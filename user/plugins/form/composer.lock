@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "e0e2ccc2fca6a3cb5d548cf61bb80f66",
+    "content-hash": "3a398e6299867ff0fa7f50cd9bf54bb8",
     "packages": [
         {
             "name": "google/recaptcha",
@@ -73,5 +73,5 @@
     "platform-overrides": {
         "php": "7.3.6"
     },
-    "plugin-api-version": "2.2.0"
+    "plugin-api-version": "2.3.0"
 }

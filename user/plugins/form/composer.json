@@ -22,7 +22,7 @@
   "require": {
     "php": "^7.3.6 || ^8.0",
     "ext-json": "*",
-    "google/recaptcha": "^1.2"
+    "google/recaptcha": "1.2.4"
   },
   "autoload": {
     "psr-4": {
