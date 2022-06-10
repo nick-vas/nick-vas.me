@@ -58,7 +58,7 @@
         "willdurand/negotiation": "3.1.0",
         "itsgoingd/clockwork": "5.1.6",
         "symfony/http-client": "^4.4",
-        "composer/semver": "1.7.2",
+        "composer/semver": "3.3.2",
         "rhukster/dom-sanitizer": "1.0.6",
         "multiavatar/multiavatar-php": "1.0.5"
     },
