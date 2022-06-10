@@ -30,7 +30,7 @@
         "psr/container": "1.1.1",
         "nyholm/psr7-server": "1.0.2",
         "nyholm/psr7": "1.5.0",
-        "twig/twig": "1.44.6",
+        "twig/twig": "3.4.1",
         "erusev/parsedown": "1.7.4",
         "erusev/parsedown-extra": "0.8.1",
         "symfony/contracts": "~1.1",
