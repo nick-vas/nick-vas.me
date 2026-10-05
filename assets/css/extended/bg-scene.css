@@ -8,11 +8,26 @@
     display: block;
     pointer-events: none;
     user-select: none;
+    /* Fades in once the first frame is drawn, instead of popping in. */
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+
+#bg-scene.is-ready {
+    opacity: 1;
 }
 
 /* Dimmer on every page except home, so text stays easy to read. */
-#bg-scene.is-quiet {
+#bg-scene.is-ready.is-quiet {
     opacity: 0.4;
+}
+
+/* The page-to-page crossfade lives in layouts/_partials/extend_head.html, because Hugo's
+   CSS minifier drops the @view-transition rule. */
+@media (prefers-reduced-motion: reduce) {
+    #bg-scene {
+        transition: none;
+    }
 }
 
 @media print {

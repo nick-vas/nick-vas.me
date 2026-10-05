@@ -65,6 +65,13 @@ elsewhere, and the current shape carries over as you move between pages.
   ignored, as are clicks that end a text selection.
 - It honours "reduce motion" (shows a still frame), pauses when the tab is hidden,
   and is skipped entirely if WebGL is unavailable.
+- A shatter carries over between pages: the shard state is saved to `sessionStorage`
+  when you leave a page and restored (fast-forwarded by the time the navigation took)
+  on the next one. Pages crossfade in browsers that support view transitions (the rule
+  is inline in `layouts/_partials/extend_head.html`, because Hugo's CSS minifier drops
+  it), and the canvas fades in on its first frame.
+- Only the current shape is prepared before the first frame (about 2 ms); the next one
+  is prepared when the browser is idle.
 - Three.js r186 is vendored in `assets/js/vendor/` (MIT, see `three.LICENSE`) and
   bundled by Hugo, so the site makes no third-party requests.
 - Tune it via the `CFG` block at the top of `bg-scene.js` (burst strength, hold and

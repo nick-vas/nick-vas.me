@@ -72,7 +72,7 @@ function init(canvas) {
   const rand = mulberry32(20261005);
 
   // ---- Shapes: each normalised to radius 1 and cut into exactly CFG.shards triangles ----
-  const SHAPES = [
+  const SHAPE_MAKERS = [
     () => new IcosahedronGeometry(1, 1),
     () => new BoxGeometry(1.25, 1.25, 1.25, 2, 2, 2),
     () => new TorusKnotGeometry(0.72, 0.24, 48, 8),
@@ -81,7 +81,16 @@ function init(canvas) {
     () => new DodecahedronGeometry(1, 0),
     () => new TetrahedronGeometry(1.1, 0),
     () => new ConeGeometry(0.85, 1.5, 24, 1),
-  ].map((make) => buildShards(make(), CFG.shards));
+  ];
+  const SHAPE_COUNT = SHAPE_MAKERS.length;
+  // Built on demand: only the current shape is cut up before the first frame, and the
+  // next one is prepared when the browser is idle, so page loads stay quick.
+  const shapeCache = [];
+  const shape = (i) => shapeCache[i] || (shapeCache[i] = buildShards(SHAPE_MAKERS[i](), CFG.shards));
+  const whenIdle = window.requestIdleCallback
+    ? (fn) => window.requestIdleCallback(fn, { timeout: 2000 })
+    : (fn) => setTimeout(fn, 300);
+  const prepareNext = () => whenIdle(() => shape((to + 1) % SHAPE_COUNT));
 
   const N = CFG.shards;
   const positions = new Float32Array(N * 9);
@@ -142,7 +151,7 @@ function init(canvas) {
   function loadShape() {
     try {
       const v = parseInt(sessionStorage.getItem('bg-scene-shape'), 10);
-      return Number.isInteger(v) && v >= 0 && v < SHAPES.length ? v : 0;
+      return Number.isInteger(v) && v >= 0 && v < SHAPE_COUNT ? v : 0;
     } catch (err) {
       return 0;
     }
@@ -152,8 +161,7 @@ function init(canvas) {
   }
 
   function resetToWhole(i) {
-    const s = SHAPES[i];
-    pos.set(s.centroids);
+    pos.set(shape(i).centroids);
     vel.fill(0);
     angVel.fill(0);
     for (let k = 0; k < N; k++) quat.set([0, 0, 0, 1], k * 4);
@@ -163,6 +171,7 @@ function init(canvas) {
     from = to = i;
     whole = true;
     writeVertices();
+    prepareNext();
   }
 
   // ---- Colour: a rainbow gradient with complementary inner faces ----
@@ -243,7 +252,7 @@ function init(canvas) {
     const lz = local.z * 0.35;
     if (whole) {
       from = to;
-      to = (to + 1) % SHAPES.length;
+      to = (to + 1) % SHAPE_COUNT;
       saveShape(to);
       morph.fill(0);
       whole = false;
@@ -270,7 +279,7 @@ function init(canvas) {
   function step(dt) {
     const K = CFG.stiffness;
     const critical = 2 * Math.sqrt(K);
-    const target = SHAPES[to].centroids;
+    const target = shape(to).centroids;
     let settled = true;
 
     for (let i = 0; i < N; i++) {
@@ -319,8 +328,8 @@ function init(canvas) {
   }
 
   function writeVertices() {
-    const A = SHAPES[from].locals;
-    const B = SHAPES[to].locals;
+    const A = shape(from).locals;
+    const B = shape(to).locals;
     for (let i = 0; i < N; i++) {
       const m = whole ? 1 : morph[i]; // morph each shard from the old shape's triangle to the new one's
       const shrink = whole ? 1 : gap[i]; // gaps open up while scattered
@@ -369,15 +378,82 @@ function init(canvas) {
     renderer.render(scene, camera);
   }
 
-  window.addEventListener('resize', () => { resize(); if (reduceMotion) { paint(clock()); place(clock(), 0); render(); } }, { passive: true });
+  // ---- Carrying a shatter over to the next page ----
+  // When the reader leaves mid-shatter, the shard state goes into sessionStorage; the next
+  // page restores it and fast-forwards by the time the navigation took.
+  const SNAPSHOT_KEY = 'bg-scene-snapshot';
+  const SNAPSHOT_MAX_AGE = 30; // seconds; older than this, just show the finished shape
+  const snapshotFields = [pos, vel, quat, angVel, recover, morph, gap];
 
-  if (reduceMotion) {
-    // Respect the OS setting: a still image, no animation or interaction.
+  function saveSnapshot() {
+    try {
+      if (whole) {
+        sessionStorage.removeItem(SNAPSHOT_KEY);
+        return;
+      }
+      sessionStorage.setItem(SNAPSHOT_KEY, JSON.stringify({
+        v: 1, n: N, at: Date.now(), from, to, settleTimer,
+        data: snapshotFields.map(toBase64),
+      }));
+    } catch (err) { /* storage full or blocked: the next page just shows the finished shape */ }
+  }
+
+  function restoreSnapshot() {
+    let snap;
+    try {
+      snap = JSON.parse(sessionStorage.getItem(SNAPSHOT_KEY));
+      sessionStorage.removeItem(SNAPSHOT_KEY);
+    } catch (err) {
+      return false;
+    }
+    const age = snap ? (Date.now() - snap.at) / 1000 : -1;
+    if (!snap || snap.v !== 1 || snap.n !== N || !(age >= 0 && age <= SNAPSHOT_MAX_AGE)) return false;
+    if (![snap.from, snap.to].every((i) => Number.isInteger(i) && i >= 0 && i < SHAPE_COUNT)) return false;
+    let decoded;
+    try {
+      decoded = snapshotFields.map((field, k) => fromBase64(snap.data[k], field.length));
+    } catch (err) {
+      return false;
+    }
+    decoded.forEach((arr, k) => snapshotFields[k].set(arr));
+    from = snap.from;
+    to = snap.to;
+    settleTimer = Number(snap.settleTimer) || 0;
+    whole = false;
+    // Catch up on the time the navigation took, in small steps so the physics stays stable.
+    for (let left = age; left > 0 && !whole; left -= 1 / 30) step(Math.min(left, 1 / 30));
+    if (!whole) writeVertices();
+    return true;
+  }
+
+  window.addEventListener('pagehide', saveSnapshot);
+  // Back/forward restores this page from memory with its old state; pick up whatever the
+  // page we just left was doing instead.
+  window.addEventListener('pageshow', (e) => {
+    if (!e.persisted || reduceMotion) return;
+    if (!restoreSnapshot()) {
+      const current = loadShape();
+      if (!whole || current !== to) resetToWhole(current);
+    }
+  });
+
+  function showFirstFrame() {
     paint(clock());
     place(clock(), 0);
     render();
+    canvas.classList.add('is-ready'); // fades the canvas in (see bg-scene.css)
+  }
+
+  window.addEventListener('resize', () => { resize(); if (reduceMotion) showFirstFrame(); }, { passive: true });
+
+  if (reduceMotion) {
+    // Respect the OS setting: a still image, no animation or interaction.
+    showFirstFrame();
     return;
   }
+
+  restoreSnapshot();
+  showFirstFrame();
 
   window.addEventListener('pointermove', (e) => {
     if (e.pointerType === 'touch') return;
@@ -439,16 +515,18 @@ function buildShards(geometry, count) {
     tris.sort((a, b) => area(b) - area(a));
     tris = tris.slice(0, count);
   }
+  // Split in rounds: each round halves the largest triangles, up to the number still
+  // needed. Far cheaper than rescanning for the single largest one each time, and the
+  // pieces come out just as even.
   while (tris.length < count) {
-    let best = 0;
-    let bestArea = -1;
-    for (let i = 0; i < tris.length; i++) {
-      const a = area(tris[i]);
-      if (a > bestArea) { bestArea = a; best = i; }
+    const order = tris.map((t, i) => [area(t), i]).sort((a, b) => b[0] - a[0]);
+    const n = Math.min(order.length, count - tris.length);
+    for (let k = 0; k < n; k++) {
+      const i = order[k][1];
+      const [t1, t2] = split(tris[i]);
+      tris[i] = t1;
+      tris.push(t2);
     }
-    const [t1, t2] = split(tris[best]);
-    tris[best] = t1;
-    tris.push(t2);
   }
 
   const BANDS = 14;
@@ -498,6 +576,22 @@ function split(t) {
   const C = [t[order[2]], t[order[2] + 1], t[order[2] + 2]];
   const M = [(A[0] + B[0]) / 2, (A[1] + B[1]) / 2, (A[2] + B[2]) / 2];
   return [Float32Array.from([...A, ...M, ...C]), Float32Array.from([...M, ...B, ...C])];
+}
+
+function toBase64(arr) {
+  const bytes = new Uint8Array(arr.buffer, arr.byteOffset, arr.byteLength);
+  let s = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return btoa(s);
+}
+
+function fromBase64(str, length) {
+  const s = atob(str);
+  const out = new Float32Array(length);
+  if (s.length !== out.byteLength) throw new Error('snapshot size mismatch');
+  const bytes = new Uint8Array(out.buffer);
+  for (let i = 0; i < s.length; i++) bytes[i] = s.charCodeAt(i);
+  return out;
 }
 
 function mulberry32(seed) {
