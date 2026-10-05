@@ -34,17 +34,15 @@ hugo --minify
 rsync -avz --delete public/ user@droplet:/var/www/nick-vas.me/
 ```
 
-Minimal Nginx server block:
+The Nginx server block is in [`deploy/nginx/nick-vas.me.conf`](deploy/nginx/nick-vas.me.conf).
+It gzips text files and sets caching: files Hugo fingerprints (the script and stylesheet,
+which have a content hash in their names) are cached by browsers for a year, while pages,
+the RSS feed and the search index are re-checked on every visit so new posts appear at once.
 
-```nginx
-server {
-    listen 80;
-    server_name nick-vas.me www.nick-vas.me;
-    root /var/www/nick-vas.me;
-    index index.html;
-    error_page 404 /404.html;
-    location / { try_files $uri $uri/ =404; }
-}
+```sh
+sudo cp deploy/nginx/nick-vas.me.conf /etc/nginx/sites-available/nick-vas.me
+sudo ln -s /etc/nginx/sites-available/nick-vas.me /etc/nginx/sites-enabled/
+sudo nginx -t && sudo systemctl reload nginx
 ```
 
 Add HTTPS with `sudo certbot --nginx -d nick-vas.me -d www.nick-vas.me`.
