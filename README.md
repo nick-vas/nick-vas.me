@@ -95,7 +95,8 @@ static site:
 | Version disclosure | `server_tokens off` | server block |
 
 Host, DNS and account hardening (SSH keys, `ufw`, `fail2ban`, unattended-upgrades, CAA,
-DNSSEC, SPF/DMARC, 2FA) are done on the droplet and at the registrar, not in this repo.
+DNSSEC, SPF/DMARC, 2FA) are done on the droplet and at the registrar, not in this repo — see
+the step-by-step runbook in [`deploy/HARDENING.md`](deploy/HARDENING.md).
 
 ## Background scene
 
