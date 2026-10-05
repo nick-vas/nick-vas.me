@@ -45,10 +45,14 @@ the RSS feed and the search index are re-checked on every visit so new posts app
 
 ```sh
 sudo cp deploy/nginx/security-headers.conf /etc/nginx/snippets/nick-vas-security.conf
-sudo cp deploy/nginx/nick-vas.me.conf /etc/nginx/sites-available/nick-vas.me
+sudo cp deploy/nginx/rate-limit.conf      /etc/nginx/conf.d/nick-vas-rate-limit.conf
+sudo cp deploy/nginx/nick-vas.me.conf     /etc/nginx/sites-available/nick-vas.me
 sudo ln -s /etc/nginx/sites-available/nick-vas.me /etc/nginx/sites-enabled/
 sudo nginx -t && sudo systemctl reload nginx
 ```
+
+Copy all three files before `nginx -t`: the server block `include`s the security snippet
+and uses the rate-limit zones, so a missing one fails the config test.
 
 The server block sends security headers (CSP, `X-Content-Type-Options`, `X-Frame-Options`,
 `Referrer-Policy`, `Permissions-Policy`, HSTS) from
@@ -60,11 +64,38 @@ response. Copy the snippet to `/etc/nginx/snippets/nick-vas-security.conf` (firs
 before `nginx -t`, or the include fails. Verify the headers reach the wire with
 `curl -sI https://nick-vas.me/ | grep -i -E 'content-security|x-frame|x-content'`.
 
-Add HTTPS with `sudo certbot --nginx -d nick-vas.me -d www.nick-vas.me`.
+Add HTTPS with `sudo certbot --nginx -d nick-vas.me -d www.nick-vas.me`. Then harden TLS:
+copy the modern-TLS snippet, include it in the `:443` block certbot created, and drop
+`TLSv1`/`TLSv1.1` from the `ssl_protocols` line in `/etc/nginx/nginx.conf`:
+
+```sh
+sudo cp deploy/nginx/tls.conf /etc/nginx/snippets/nick-vas-tls.conf
+# add  include snippets/nick-vas-tls.conf;  inside the listen 443 server block, then:
+sudo nginx -t && sudo systemctl reload nginx
+```
 
 Ubuntu's `/etc/nginx/nginx.conf` allows 768 connections per worker, and a 1-vCPU droplet
 has one worker; past that, visitors silently queue and time out. Raise it to
 `worker_connections 4096;` in the `events` block, then `sudo systemctl reload nginx`.
+
+### Hardening summary
+
+The server block and its snippets defend against the attacks that actually apply to a
+static site:
+
+| Attack | Defence | Where |
+| --- | --- | --- |
+| Clickjacking, MIME-sniffing, off-origin injection, referrer leak | CSP + `X-Frame-Options`, `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy` | `security-headers.conf` |
+| Protocol downgrade | HSTS | `security-headers.conf` |
+| Obsolete TLS 1.0/1.1, weak ciphers | TLS 1.2/1.3 only, modern ciphers, OCSP stapling | `tls.conf` |
+| Request floods / brute force | `limit_req` 30 r/s/IP (burst 60), `limit_conn` 30/IP → 429 | `rate-limit.conf` + server block |
+| Slowloris (slow requests) | `client_header_timeout`/`client_body_timeout`/`send_timeout` 10s | server block |
+| Oversized request bodies | `client_max_body_size 1k` → 413 | server block |
+| Source/metadata disclosure (`.git`, `.env`) | dotfile deny (exempts `.well-known`) | server block |
+| Version disclosure | `server_tokens off` | server block |
+
+Host, DNS and account hardening (SSH keys, `ufw`, `fail2ban`, unattended-upgrades, CAA,
+DNSSEC, SPF/DMARC, 2FA) are done on the droplet and at the registrar, not in this repo.
 
 ## Background scene
 
