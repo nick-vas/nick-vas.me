@@ -1,0 +1,22 @@
+/* Three.js background (assets/js/bg-scene.js). Sits behind everything and never takes clicks. */
+#bg-scene {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    z-index: -1;
+    display: block;
+    pointer-events: none;
+    user-select: none;
+}
+
+/* Dimmer on every page except home, so text stays easy to read. */
+#bg-scene.is-quiet {
+    opacity: 0.4;
+}
+
+@media print {
+    #bg-scene {
+        display: none;
+    }
+}

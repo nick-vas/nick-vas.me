@@ -49,6 +49,23 @@ server {
 
 Add HTTPS with `sudo certbot --nginx -d nick-vas.me -d www.nick-vas.me`.
 
+## Background scene
+
+Every page has a Three.js background of floating shapes (`assets/js/bg-scene.js`).
+Clicking empty space scatters the nearby shapes and they slowly regather; the cursor
+gently pushes them aside. It is full strength on the home page and dimmed elsewhere.
+
+- The canvas has `pointer-events: none`, so it never blocks links, buttons or text
+  selection. Clicks on links, buttons, code, post cards, the header and the footer are
+  ignored, as are clicks that end a text selection.
+- It honours "reduce motion" (shows a still frame), pauses when the tab is hidden,
+  and is skipped entirely if WebGL is unavailable.
+- Three.js r186 is vendored in `assets/js/vendor/` (MIT, see `three.LICENSE`) and
+  bundled by Hugo, so the site makes no third-party requests.
+- Tune it via the `CFG` block at the top of `bg-scene.js` (burst strength, regather
+  time, hover force) and the `PALETTES` colours. Page dimming is in
+  `assets/css/extended/bg-scene.css`.
+
 ## Updating the theme
 
 ```sh

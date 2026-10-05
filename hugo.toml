@@ -37,7 +37,7 @@ buildFuture = false
   # Home page: short intro on top, latest posts below.
   [params.homeInfoParams]
     Title = "Hi, I'm Nick 👋"
-    Content = "Welcome to my corner of the web. More about me on the [about](/about/) page; latest posts below."
+    Content = "Welcome to my corner of the web. More about me on the [about](/about/) page; latest posts below. Click anywhere in the background to scatter the shapes."
 
   [[params.socialIcons]]
     name = "github"
