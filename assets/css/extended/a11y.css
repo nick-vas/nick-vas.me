@@ -61,6 +61,35 @@ body {
         0 0 6px var(--halo);
 }
 
+/* A few PaperMod containers clip their overflow (the nav menu scrolls sideways on phones; the
+   home title and intro use line-clamp), which would also clip the halo of glyphs at their
+   edges, letting a shard touch the letter. Grow each clip box by the halo width and cancel it
+   with a negative margin, so nothing moves. */
+.menu {
+    padding-inline: 5px;
+    margin-inline: -5px;
+}
+
+.first-entry .entry-header,
+.home-info .entry-content {
+    padding: 5px;
+    margin: -5px;
+}
+
+/* Long-form text gets an opaque block in the page colour instead of a halo. Painting a halo
+   around every glyph of a long post measured ~24x the raster work while scrolling; a
+   background costs nothing and guarantees contrast. Shards simply pass behind these blocks
+   (and show in the gaps between them). Code blocks, rules and images keep their own look. */
+.post-content > :is(p, h1, h2, h3, h4, h5, h6, ul, ol, dl, blockquote, table, details, figure),
+.archive-entry {
+    background: var(--halo);
+}
+
+.post-content,
+.archive-entry {
+    text-shadow: none;
+}
+
 /* Elements on their own opaque background sit above the canvas already; a halo in the page
    colour would show as an outline there. */
 .post-entry, .paginav, .share-buttons, .post-tags a, .terms-tags a, .toc, pre, code, kbd,
@@ -156,9 +185,10 @@ input, textarea, select, button, .scene-controls, .skip-link, mark {
 }
 
 /* 2.4.11 Focus Not Obscured: when keyboard focus scrolls the page, keep the focused element
-   clear of the fixed controls (bottom-left) and PaperMod's go-to-top button (bottom-right). */
+   clear of the fixed controls (bottom-left, up to 60px) and PaperMod's go-to-top button
+   (bottom-right, 64-104px up: bottom 4rem + height 2.5rem). */
 html {
-    scroll-padding-bottom: 80px;
+    scroll-padding-bottom: 120px;
 }
 
 /* ---- Windows High Contrast / forced colours: drop the decorative scene entirely ---- */

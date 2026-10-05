@@ -319,10 +319,10 @@ function init(canvas) {
         // WCAG 2.3.1 (Three Flashes): a tumbling shard swaps its rainbow face for the
         // complementary one twice per turn. Capping spin at one turn per second keeps every
         // shard under 3 flashes a second, however fast someone clicks (clicks add spin).
-        const k = MAX_SPIN / w;
-        wx = angVel[ix] *= k;
-        wy = angVel[ix + 1] *= k;
-        wz = angVel[ix + 2] *= k;
+        const spinScale = MAX_SPIN / w;
+        wx = angVel[ix] *= spinScale;
+        wy = angVel[ix + 1] *= spinScale;
+        wz = angVel[ix + 2] *= spinScale;
         w = MAX_SPIN;
       }
       if (w > 1e-4) {
@@ -373,10 +373,24 @@ function init(canvas) {
 
   // Wall-clock time keeps the hover motion in phase across page loads.
   const clock = () => (Date.now() / 1000) % 100000;
-  // Time spent paused is subtracted, so resuming continues smoothly instead of jumping.
+  // Time spent paused is subtracted, so resuming continues smoothly instead of jumping, and
+  // while paused the scene's time stands still at the moment of pausing. Kept in
+  // sessionStorage so the pose stays continuous across page loads, paused or not.
+  const TIME_KEY = 'bg-scene-time';
   let timeOffset = 0;
   let pausedAt = 0;
-  const animTime = () => clock() - timeOffset;
+  function loadTime() {
+    try {
+      const t = JSON.parse(sessionStorage.getItem(TIME_KEY));
+      timeOffset = Number(t && t.offset) || 0;
+      pausedAt = Number(t && t.pausedAt) || 0;
+    } catch (err) { /* storage blocked: start from the wall clock */ }
+  }
+  function saveTime() {
+    try { sessionStorage.setItem(TIME_KEY, JSON.stringify({ offset: timeOffset, pausedAt })); } catch (err) { /* blocked */ }
+  }
+  loadTime();
+  const animTime = () => (paused && pausedAt ? pausedAt : clock()) - timeOffset;
 
   function place(t, dt) {
     if (hovering) {
@@ -413,9 +427,14 @@ function init(canvas) {
   const SNAPSHOT_MAX_AGE = 30; // seconds; older than this, just show the finished shape
   const snapshotFields = [pos, vel, quat, angVel, recover, morph, gap];
 
+  function discardSnapshot() {
+    try { sessionStorage.removeItem(SNAPSHOT_KEY); } catch (err) { /* blocked */ }
+  }
+
   function saveSnapshot() {
     try {
-      if (whole) {
+      // A paused page never hands its frozen shards on: the next page shows the finished shape.
+      if (whole || paused) {
         sessionStorage.removeItem(SNAPSHOT_KEY);
         return;
       }
@@ -459,10 +478,18 @@ function init(canvas) {
   // page we just left was doing instead.
   window.addEventListener('pageshow', (e) => {
     if (!e.persisted) return;
-    // Another page may have paused/resumed the animation while this one sat in the cache.
+    // Other pages may have paused/resumed the animation, moved the time offset or advanced the
+    // shape while this one sat in the cache; pick all of that up.
+    loadTime();
     const pref = loadMotionPref();
     if (pref !== null && pref !== paused) setPaused(pref, false);
-    if (paused) { showStill(); return; }
+    if (paused) {
+      const current = loadShape();
+      if (!whole || current !== to) resetToWhole(current);
+      discardSnapshot();
+      showStill();
+      return;
+    }
     if (!restoreSnapshot()) {
       const current = loadShape();
       if (!whole || current !== to) resetToWhole(current);
@@ -489,7 +516,7 @@ function init(canvas) {
   window.addEventListener('click', (e) => {
     if (paused) return;
     if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
-    if (e.target instanceof Element && e.target.closest(IGNORE + ', .scene-controls, .skip-link')) return;
+    if (e.target instanceof Element && e.target.closest(IGNORE + ', .scene-controls')) return;
     const sel = window.getSelection();
     if (sel && !sel.isCollapsed) return; // the user was selecting text
     shatter(e.clientX, e.clientY);
@@ -511,9 +538,15 @@ function init(canvas) {
     }
     render();
   }
-  function start() { if (!raf && !paused && !document.hidden) { last = performance.now(); raf = requestAnimationFrame(frame); } }
+  // In forced-colours mode (Windows High Contrast) a11y.css hides the scene; don't keep
+  // rendering it out of sight.
+  const forcedColors = window.matchMedia('(forced-colors: active)');
+  function start() {
+    if (!raf && !paused && !document.hidden && !forcedColors.matches) { last = performance.now(); raf = requestAnimationFrame(frame); }
+  }
   function stop() { cancelAnimationFrame(raf); raf = 0; }
   document.addEventListener('visibilitychange', () => (document.hidden ? stop() : start()));
+  forcedColors.addEventListener('change', () => (forcedColors.matches ? stop() : start()));
 
   // ---- Controls (layouts/_partials/scene_controls.html) ----
   // Shown only once the scene is running, so there is nothing to pause without WebGL or JS.
@@ -525,19 +558,21 @@ function init(canvas) {
     paused = p;
     if (p) {
       stop();
-      pausedAt = clock();
+      if (!pausedAt) pausedAt = clock(); // keep an earlier page's pause moment, so the pose matches
+      // Drop the cursor lean and glow too, so the paused pose depends only on time and is the
+      // same on every page (otherwise it would jump on the next page load).
       hovering = false;
+      lean.set(0, 0);
+      glow = 0;
       showStill();
     } else {
       if (pausedAt) timeOffset += clock() - pausedAt;
       pausedAt = 0;
       start();
     }
-    if (pauseBtn) {
-      // A toggle button keeps one name; aria-pressed carries the state (WAI-ARIA APG).
-      pauseBtn.setAttribute('aria-pressed', String(p));
-      pauseBtn.title = p ? 'Resume background animation' : 'Pause background animation';
-    }
+    saveTime();
+    // A toggle button keeps one name (and tooltip); aria-pressed carries the state (WAI-ARIA APG).
+    if (pauseBtn) pauseBtn.setAttribute('aria-pressed', String(p));
     if (shatterBtn) shatterBtn.disabled = p;
     if (save) {
       try { localStorage.setItem(MOTION_KEY, p ? 'paused' : 'playing'); } catch (err) { /* storage blocked */ }
@@ -553,11 +588,10 @@ function init(canvas) {
   if (pauseBtn) pauseBtn.addEventListener('click', () => setPaused(!paused));
   if (shatterBtn) shatterBtn.addEventListener('click', () => { if (!paused) shatterFromCentre(); });
 
-  if (!paused) restoreSnapshot();
-  if (paused) pausedAt = clock();
-  showStill();
+  if (paused) discardSnapshot(); else restoreSnapshot();
+  setPaused(paused, false); // draws the still frame when paused, starts the loop when playing
+  if (!paused) showStill(); // first frame now, not on the next animation frame
   canvas.classList.add('is-ready'); // fades the canvas in (see bg-scene.css)
-  setPaused(paused, false);
   if (controls) controls.hidden = false;
 }
 
