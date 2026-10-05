@@ -36,6 +36,19 @@ if (canvas) init(canvas);
 function init(canvas) {
   const quiet = canvas.classList.contains('is-quiet');
   const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  // WCAG 2.2.2 (Pause, Stop, Hide): the animation can be paused with the button in
+  // baseof.html. The choice is remembered across pages; with no saved choice, the OS
+  // "reduce motion" setting starts it paused.
+  const MOTION_KEY = 'bg-motion';
+  let paused = loadMotionPref() ?? reduceMotion;
+  function loadMotionPref() {
+    try {
+      const v = localStorage.getItem(MOTION_KEY);
+      return v === 'paused' ? true : v === 'playing' ? false : null;
+    } catch (err) {
+      return null;
+    }
+  }
 
   const CFG = {
     fov: 40,
@@ -205,7 +218,7 @@ function init(canvas) {
     accent.setHSL((drift + CFG.hueSpan / 2 + 0.5) % 1, 0.9, 0.6);
   }
   applyTheme();
-  new MutationObserver(() => { applyTheme(); if (reduceMotion) { paint(clock()); render(); } })
+  new MutationObserver(() => { applyTheme(); if (paused) { paint(animTime()); render(); } })
     .observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
 
   // ---- Layout ----
@@ -274,6 +287,7 @@ function init(canvas) {
   }
 
   // ---- Simulation ----
+  const MAX_SPIN = 2 * Math.PI; // rad/s: at most one turn per second (see WCAG 2.3.1 note in step)
   const SETTLE_DIST = 0.002; // shape radii (sum of |dx|+|dy|+|dz|)
   const SETTLE_SPEED = 0.01;
   function step(dt) {
@@ -299,8 +313,18 @@ function init(canvas) {
 
       // Tumble, with the spin bleeding off and the shard easing back to its resting orientation.
       q.fromArray(quat, i * 4);
-      const wx = angVel[ix], wy = angVel[ix + 1], wz = angVel[ix + 2];
-      const w = Math.hypot(wx, wy, wz);
+      let wx = angVel[ix], wy = angVel[ix + 1], wz = angVel[ix + 2];
+      let w = Math.hypot(wx, wy, wz);
+      if (w > MAX_SPIN) {
+        // WCAG 2.3.1 (Three Flashes): a tumbling shard swaps its rainbow face for the
+        // complementary one twice per turn. Capping spin at one turn per second keeps every
+        // shard under 3 flashes a second, however fast someone clicks (clicks add spin).
+        const spinScale = MAX_SPIN / w;
+        wx = angVel[ix] *= spinScale;
+        wy = angVel[ix + 1] *= spinScale;
+        wz = angVel[ix + 2] *= spinScale;
+        w = MAX_SPIN;
+      }
       if (w > 1e-4) {
         dq.setFromAxisAngle(axis.set(wx / w, wy / w, wz / w), w * dt);
         q.premultiply(dq);
@@ -349,6 +373,24 @@ function init(canvas) {
 
   // Wall-clock time keeps the hover motion in phase across page loads.
   const clock = () => (Date.now() / 1000) % 100000;
+  // Time spent paused is subtracted, so resuming continues smoothly instead of jumping, and
+  // while paused the scene's time stands still at the moment of pausing. Kept in
+  // sessionStorage so the pose stays continuous across page loads, paused or not.
+  const TIME_KEY = 'bg-scene-time';
+  let timeOffset = 0;
+  let pausedAt = 0;
+  function loadTime() {
+    try {
+      const t = JSON.parse(sessionStorage.getItem(TIME_KEY));
+      timeOffset = Number(t && t.offset) || 0;
+      pausedAt = Number(t && t.pausedAt) || 0;
+    } catch (err) { /* storage blocked: start from the wall clock */ }
+  }
+  function saveTime() {
+    try { sessionStorage.setItem(TIME_KEY, JSON.stringify({ offset: timeOffset, pausedAt })); } catch (err) { /* blocked */ }
+  }
+  loadTime();
+  const animTime = () => (paused && pausedAt ? pausedAt : clock()) - timeOffset;
 
   function place(t, dt) {
     if (hovering) {
@@ -385,9 +427,14 @@ function init(canvas) {
   const SNAPSHOT_MAX_AGE = 30; // seconds; older than this, just show the finished shape
   const snapshotFields = [pos, vel, quat, angVel, recover, morph, gap];
 
+  function discardSnapshot() {
+    try { sessionStorage.removeItem(SNAPSHOT_KEY); } catch (err) { /* blocked */ }
+  }
+
   function saveSnapshot() {
     try {
-      if (whole) {
+      // A paused page never hands its frozen shards on: the next page shows the finished shape.
+      if (whole || paused) {
         sessionStorage.removeItem(SNAPSHOT_KEY);
         return;
       }
@@ -430,33 +477,36 @@ function init(canvas) {
   // Back/forward restores this page from memory with its old state; pick up whatever the
   // page we just left was doing instead.
   window.addEventListener('pageshow', (e) => {
-    if (!e.persisted || reduceMotion) return;
+    if (!e.persisted) return;
+    // Other pages may have paused/resumed the animation, moved the time offset or advanced the
+    // shape while this one sat in the cache; pick all of that up.
+    loadTime();
+    const pref = loadMotionPref();
+    if (pref !== null && pref !== paused) setPaused(pref, false);
+    if (paused) {
+      const current = loadShape();
+      if (!whole || current !== to) resetToWhole(current);
+      discardSnapshot();
+      showStill();
+      return;
+    }
     if (!restoreSnapshot()) {
       const current = loadShape();
       if (!whole || current !== to) resetToWhole(current);
     }
   });
 
-  function showFirstFrame() {
-    paint(clock());
-    place(clock(), 0);
+  function showStill() {
+    const t = animTime();
+    paint(t);
+    place(t, 0);
     render();
-    canvas.classList.add('is-ready'); // fades the canvas in (see bg-scene.css)
   }
 
-  window.addEventListener('resize', () => { resize(); if (reduceMotion) showFirstFrame(); }, { passive: true });
-
-  if (reduceMotion) {
-    // Respect the OS setting: a still image, no animation or interaction.
-    showFirstFrame();
-    return;
-  }
-
-  restoreSnapshot();
-  showFirstFrame();
+  window.addEventListener('resize', () => { resize(); if (paused) showStill(); }, { passive: true });
 
   window.addEventListener('pointermove', (e) => {
-    if (e.pointerType === 'touch') return;
+    if (e.pointerType === 'touch' || paused) return;
     hovering = true;
     ndc.set((e.clientX / window.innerWidth) * 2 - 1, -(e.clientY / window.innerHeight) * 2 + 1);
   }, { passive: true });
@@ -464,8 +514,9 @@ function init(canvas) {
   window.addEventListener('blur', () => { hovering = false; });
 
   window.addEventListener('click', (e) => {
+    if (paused) return;
     if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
-    if (e.target instanceof Element && e.target.closest(IGNORE)) return;
+    if (e.target instanceof Element && e.target.closest(IGNORE + ', .scene-controls')) return;
     const sel = window.getSelection();
     if (sel && !sel.isCollapsed) return; // the user was selecting text
     shatter(e.clientX, e.clientY);
@@ -478,7 +529,7 @@ function init(canvas) {
     // rAF timestamps can be slightly earlier than performance.now() at start(), so clamp at 0.
     const dt = Math.min(Math.max(0, (now - last) / 1000) || 0, 1 / 30);
     last = now;
-    const t = clock();
+    const t = animTime();
     place(t, dt);
     paint(t);
     if (!whole) {
@@ -487,10 +538,61 @@ function init(canvas) {
     }
     render();
   }
-  function start() { if (!raf) { last = performance.now(); raf = requestAnimationFrame(frame); } }
+  // In forced-colours mode (Windows High Contrast) a11y.css hides the scene; don't keep
+  // rendering it out of sight.
+  const forcedColors = window.matchMedia('(forced-colors: active)');
+  function start() {
+    if (!raf && !paused && !document.hidden && !forcedColors.matches) { last = performance.now(); raf = requestAnimationFrame(frame); }
+  }
   function stop() { cancelAnimationFrame(raf); raf = 0; }
   document.addEventListener('visibilitychange', () => (document.hidden ? stop() : start()));
-  start();
+  forcedColors.addEventListener('change', () => (forcedColors.matches ? stop() : start()));
+
+  // ---- Controls (layouts/_partials/scene_controls.html) ----
+  // Shown only once the scene is running, so there is nothing to pause without WebGL or JS.
+  const controls = document.getElementById('scene-controls');
+  const pauseBtn = document.getElementById('scene-pause');
+  const shatterBtn = document.getElementById('scene-shatter');
+
+  function setPaused(p, save = true) {
+    paused = p;
+    if (p) {
+      stop();
+      if (!pausedAt) pausedAt = clock(); // keep an earlier page's pause moment, so the pose matches
+      // Drop the cursor lean and glow too, so the paused pose depends only on time and is the
+      // same on every page (otherwise it would jump on the next page load).
+      hovering = false;
+      lean.set(0, 0);
+      glow = 0;
+      showStill();
+    } else {
+      if (pausedAt) timeOffset += clock() - pausedAt;
+      pausedAt = 0;
+      start();
+    }
+    saveTime();
+    // A toggle button keeps one name (and tooltip); aria-pressed carries the state (WAI-ARIA APG).
+    if (pauseBtn) pauseBtn.setAttribute('aria-pressed', String(p));
+    if (shatterBtn) shatterBtn.disabled = p;
+    if (save) {
+      try { localStorage.setItem(MOTION_KEY, p ? 'paused' : 'playing'); } catch (err) { /* storage blocked */ }
+    }
+  }
+
+  // WCAG 2.1.1 (Keyboard): the shatter isn't mouse-only; this button bursts the shape from its centre.
+  function shatterFromCentre() {
+    const c = v3.copy(group.position).project(camera);
+    shatter(((c.x + 1) / 2) * window.innerWidth, ((1 - c.y) / 2) * window.innerHeight);
+  }
+
+  if (pauseBtn) pauseBtn.addEventListener('click', () => setPaused(!paused));
+  if (shatterBtn) shatterBtn.addEventListener('click', () => { if (!paused) shatterFromCentre(); });
+
+  if (paused) discardSnapshot(); else restoreSnapshot();
+  setPaused(paused, false); // draws the still frame when paused, starts the loop when playing
+  if (!paused) showStill(); // first frame now, not on the next animation frame
+  canvas.classList.add('is-ready'); // fades the canvas in (see bg-scene.css)
+  if (controls) controls.hidden = false;
 }
 
 // Turn a geometry into exactly `count` triangles (splitting the largest ones along their

@@ -129,6 +129,25 @@ elsewhere, and the current shape carries over as you move between pages.
   the same shape instead of the next one, change `to = (to + 1) % SHAPES.length` to
   `to = from` in `shatter()`. Page dimming is in `assets/css/extended/bg-scene.css`.
 
+## Accessibility
+
+The site targets **WCAG 2.2 Level AA**. Most of it comes from PaperMod; the additions below
+cover what the theme doesn't, mainly around the animated background.
+
+| WCAG | What | Where |
+| --- | --- | --- |
+| 2.2.2 Pause, Stop, Hide | Pause button for the background animation, remembered across pages; the paused pose is identical on every page. With no saved choice, the OS "reduce motion" setting starts it paused (and still lets the visitor press play). Nothing animates in Windows High Contrast. | `layouts/_partials/scene_controls.html`, `assets/js/bg-scene.js` |
+| 2.1.1 Keyboard | The shatter is also a button, so it isn't mouse-only. | same |
+| 2.3.1 Three Flashes | Shard spin is capped at one turn per second, so a shard swaps its rainbow face for the complementary one at most twice a second, however fast someone clicks. | `bg-scene.js` (`MAX_SPIN`) |
+| 1.4.3 Contrast | Shards passing behind text never reduce its contrast. Short text (header, home intro, titles, footer) gets a halo in the page's own background colour; long-form text (post bodies, archive lists) sits on blocks of the page colour instead, which costs nothing to paint (a halo on every glyph of a long post measured ~20x the scroll raster work). Theme containers that clip overflow are widened so the halo isn't cut off. Dark-mode post tags raised from 4.24:1 to 6.8:1. | `assets/css/extended/a11y.css` |
+| 2.4.1 Bypass Blocks | "Skip to content" link, first in the tab order; moves focus into `<main>`. | `layouts/baseof.html` |
+| 2.4.4 / 4.1.2 | Social icon links named "GitHub (opens in new tab)", "RSS feed (opens in new tab)". | `layouts/_partials/social_icons.html` |
+| 2.4.7 / 2.4.11 / 2.5.8 | 44×44 px controls with a 3 px focus ring; `scroll-padding-bottom: 120px` keeps keyboard focus clear of the fixed buttons, including PaperMod's go-to-top button. | `a11y.css` |
+| Forced colours | In Windows High Contrast the decorative scene is removed. | `a11y.css` |
+
+`layouts/baseof.html` and `layouts/_partials/social_icons.html` override PaperMod's files;
+when updating the theme, compare them with `themes/PaperMod/layouts/` (changes are marked).
+
 ## Updating the theme
 
 ```sh
