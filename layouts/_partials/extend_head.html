@@ -1,0 +1,3 @@
+{{- /* Crossfade between pages (Chrome, Edge, Safari; other browsers navigate as normal).
+     Inline because Hugo's CSS minifier drops @view-transition. */ -}}
+<style>@view-transition{navigation:auto}@media (prefers-reduced-motion:reduce){@view-transition{navigation:none}}</style>

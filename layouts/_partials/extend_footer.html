@@ -1,0 +1,4 @@
+{{- /* Three.js background scene, on every page. Full strength on home, dimmed elsewhere. */ -}}
+{{- $js := resources.Get "js/bg-scene.js" | js.Build (dict "format" "iife" "minify" true "target" "es2018") | fingerprint }}
+<canvas id="bg-scene"{{ if not .IsHome }} class="is-quiet"{{ end }} aria-hidden="true"></canvas>
+<script defer src="{{ $js.RelPermalink }}" integrity="{{ $js.Data.Integrity }}"></script>

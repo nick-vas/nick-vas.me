@@ -30,24 +30,61 @@ Set `draft: false` (or delete the line) to publish a post.
 ## Deploying to the droplet
 
 ```sh
-hugo --minify
-rsync -avz --delete public/ user@droplet:/var/www/nick-vas.me/
+DEPLOY_TARGET=user@your-droplet ./deploy/deploy.sh
 ```
 
-Minimal Nginx server block:
+[`deploy/deploy.sh`](deploy/deploy.sh) builds the site, makes pre-compressed `.gz` copies of
+text files, and uploads to `/var/www/nick-vas.me` (override with `DEPLOY_PATH`) with
+permissions Nginx can read. Use it rather than a plain `rsync`: the Nginx config serves those
+`.gz` copies directly instead of compressing on every request.
 
-```nginx
-server {
-    listen 80;
-    server_name nick-vas.me www.nick-vas.me;
-    root /var/www/nick-vas.me;
-    index index.html;
-    error_page 404 /404.html;
-    location / { try_files $uri $uri/ =404; }
-}
+The Nginx server block is in [`deploy/nginx/nick-vas.me.conf`](deploy/nginx/nick-vas.me.conf).
+It gzips text files and sets caching: files Hugo fingerprints (the script and stylesheet,
+which have a content hash in their names) are cached by browsers for a year, while pages,
+the RSS feed and the search index are re-checked on every visit so new posts appear at once.
+
+```sh
+sudo cp deploy/nginx/nick-vas.me.conf /etc/nginx/sites-available/nick-vas.me
+sudo ln -s /etc/nginx/sites-available/nick-vas.me /etc/nginx/sites-enabled/
+sudo nginx -t && sudo systemctl reload nginx
 ```
 
 Add HTTPS with `sudo certbot --nginx -d nick-vas.me -d www.nick-vas.me`.
+
+Ubuntu's `/etc/nginx/nginx.conf` allows 768 connections per worker, and a 1-vCPU droplet
+has one worker; past that, visitors silently queue and time out. Raise it to
+`worker_connections 4096;` in the `events` block, then `sudo systemctl reload nginx`.
+
+## Background scene
+
+Every page has a Three.js background (`assets/js/bg-scene.js`): one primitive at a time
+hovers and slowly turns. Clicking empty space shatters it into its own triangle shards,
+which drift apart and slowly regather as the next primitive (icosahedron, cube, torus
+knot, octahedron, torus, dodecahedron, tetrahedron, cone, then round again). The shape
+is coloured with a rainbow gradient that slowly turns through the spectrum; each shard's
+inner face shows the complementary hue, so tumbling shards flash between a colour and
+its complement. The cursor makes the shape lean and glow in the complementary colour. It is full strength on the home page and dimmed
+elsewhere, and the current shape carries over as you move between pages.
+
+- The canvas has `pointer-events: none`, so it never blocks links, buttons or text
+  selection. Clicks on links, buttons, code, post cards, the header and the footer are
+  ignored, as are clicks that end a text selection.
+- It honours "reduce motion" (shows a still frame), pauses when the tab is hidden,
+  and is skipped entirely if WebGL is unavailable.
+- A shatter carries over between pages: the shard state is saved to `sessionStorage`
+  when you leave a page and restored (fast-forwarded by the time the navigation took)
+  on the next one. Pages crossfade in browsers that support view transitions (the rule
+  is inline in `layouts/_partials/extend_head.html`, because Hugo's CSS minifier drops
+  it), and the canvas fades in on its first frame.
+- Only the current shape is prepared before the first frame (about 2 ms); the next one
+  is prepared when the browser is idle.
+- Three.js r186 is vendored in `assets/js/vendor/` (MIT, see `three.LICENSE`) and
+  bundled by Hugo, so the site makes no third-party requests.
+- Tune it via the `CFG` block at the top of `bg-scene.js` (burst strength, hold and
+  regather time, shard count, `hueSpan` and `hueDrift` for the rainbow), the `SHAPES`
+  list and the `TONES` saturation/lightness per theme. To reform
+  the same shape instead of the next one, change `to = (to + 1) % SHAPES.length` to
+  `to = from` in `shatter()`. Page dimming is in `assets/css/extended/bg-scene.css`.
 
 ## Updating the theme
 
