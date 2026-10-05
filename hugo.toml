@@ -37,14 +37,16 @@ buildFuture = false
   # Home page: short intro on top, latest posts below.
   [params.homeInfoParams]
     Title = "Hi, I'm Nick 👋"
-    Content = "Welcome to my corner of the web. More about me on the [about](/about/) page; latest posts below. Click anywhere in the background to shatter the shape; it regathers as the next one."
+    Content = "Welcome to my corner of the web. More about me on the [about](/about/) page; latest posts below. Click the background, or use the shatter button, to break the shape apart; it regathers as the next one. The pause button stops the animation."
 
   [[params.socialIcons]]
     name = "github"
+    title = "GitHub"
     url = "https://github.com/nick-vas"
 
   [[params.socialIcons]]
     name = "rss"
+    title = "RSS feed"
     url = "/index.xml"
 
   [params.fuseOpts]

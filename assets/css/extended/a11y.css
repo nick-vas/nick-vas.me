@@ -1,0 +1,181 @@
+/* Accessibility (WCAG 2.2 AA). See README "Accessibility". */
+
+/* ---- 1.4.3 Contrast over the animated background ----
+   The WebGL scene can put a shard of any colour behind any text, so text gets a solid
+   "halo" in the page's own background colour. On the plain page it is invisible; over a
+   shard it keeps every glyph edged in the colour its contrast was designed against.
+   (WCAG's Understanding 1.4.3 counts a halo like this as the text's background.) */
+:root {
+    --halo: var(--theme);
+}
+
+/* PaperMod paints list pages with --code-bg in light mode. */
+.list {
+    --halo: var(--code-bg);
+}
+
+[data-theme="dark"] .list {
+    --halo: var(--theme);
+}
+
+body {
+    text-shadow:
+        -3px -1px 0 var(--halo),
+        -3px 0px 0 var(--halo),
+        -3px 1px 0 var(--halo),
+        -2px -2px 0 var(--halo),
+        -2px -1px 0 var(--halo),
+        -2px 0px 0 var(--halo),
+        -2px 1px 0 var(--halo),
+        -2px 2px 0 var(--halo),
+        -1px -3px 0 var(--halo),
+        -1px -2px 0 var(--halo),
+        -1px -1px 0 var(--halo),
+        -1px 0px 0 var(--halo),
+        -1px 1px 0 var(--halo),
+        -1px 2px 0 var(--halo),
+        -1px 3px 0 var(--halo),
+        0px -3px 0 var(--halo),
+        0px -2px 0 var(--halo),
+        0px -1px 0 var(--halo),
+        0px 1px 0 var(--halo),
+        0px 2px 0 var(--halo),
+        0px 3px 0 var(--halo),
+        1px -3px 0 var(--halo),
+        1px -2px 0 var(--halo),
+        1px -1px 0 var(--halo),
+        1px 0px 0 var(--halo),
+        1px 1px 0 var(--halo),
+        1px 2px 0 var(--halo),
+        1px 3px 0 var(--halo),
+        2px -2px 0 var(--halo),
+        2px -1px 0 var(--halo),
+        2px 0px 0 var(--halo),
+        2px 1px 0 var(--halo),
+        2px 2px 0 var(--halo),
+        3px -1px 0 var(--halo),
+        3px 0px 0 var(--halo),
+        3px 1px 0 var(--halo),
+        0 0 4px var(--halo),
+        0 0 4px var(--halo),
+        0 0 6px var(--halo);
+}
+
+/* Elements on their own opaque background sit above the canvas already; a halo in the page
+   colour would show as an outline there. */
+.post-entry, .paginav, .share-buttons, .post-tags a, .terms-tags a, .toc, pre, code, kbd,
+input, textarea, select, button, .scene-controls, .skip-link, mark {
+    text-shadow: none;
+}
+
+::selection {
+    text-shadow: none;
+}
+
+/* ---- 1.4.3 Post tags in dark mode (4.24:1 in the theme; needs 4.5:1) ---- */
+[data-theme="dark"] .post-tags a {
+    color: var(--content);
+}
+
+/* ---- 2.4.1 Bypass Blocks: skip link, visible when focused ---- */
+.skip-link {
+    position: absolute;
+    left: 8px;
+    top: -100px;
+    z-index: 100;
+    padding: 8px 16px;
+    border-radius: var(--radius);
+    background: var(--primary);
+    color: var(--theme);
+    font-weight: 600;
+    text-decoration: none;
+}
+
+.skip-link:focus {
+    top: 8px;
+}
+
+/* main gets focus from the skip link (tabindex=-1); it isn't interactive, so no ring. */
+#main:focus {
+    outline: none;
+}
+
+/* ---- 2.2.2 / 2.1.1 Background animation controls ---- */
+/* PaperMod's reset sets `aside { display: block }`, which would override the hidden
+   attribute and show dead buttons when JavaScript or WebGL is unavailable. */
+.scene-controls[hidden] {
+    display: none !important;
+}
+
+.scene-controls:not([hidden]) {
+    position: fixed;
+    left: 16px;
+    bottom: 16px;
+    z-index: 20;
+    display: flex;
+    gap: 8px;
+}
+
+/* 2.5.8 Target Size: 44x44 (above the 24x24 AA minimum). */
+.scene-btn {
+    display: grid;
+    place-items: center;
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    border-radius: 50%;
+    border: 1px solid var(--tertiary);
+    background: var(--entry);
+    color: var(--primary);
+    cursor: pointer;
+}
+
+.scene-btn:hover {
+    background: var(--border);
+}
+
+.scene-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.scene-btn .icon-play,
+.scene-btn[aria-pressed="true"] .icon-pause {
+    display: none;
+}
+
+.scene-btn[aria-pressed="true"] .icon-play {
+    display: block;
+}
+
+/* 2.4.7 Focus Visible (and 2.4.13-style thickness) for the new controls and skip link. */
+.scene-btn:focus-visible,
+.skip-link:focus-visible {
+    outline: 3px solid var(--primary);
+    outline-offset: 2px;
+}
+
+/* 2.4.11 Focus Not Obscured: when keyboard focus scrolls the page, keep the focused element
+   clear of the fixed controls (bottom-left) and PaperMod's go-to-top button (bottom-right). */
+html {
+    scroll-padding-bottom: 80px;
+}
+
+/* ---- Windows High Contrast / forced colours: drop the decorative scene entirely ---- */
+@media (forced-colors: active) {
+    #bg-scene,
+    .scene-controls {
+        display: none !important;
+    }
+}
+
+@media print {
+    body {
+        text-shadow: none;
+    }
+
+    .scene-controls,
+    .skip-link {
+        display: none !important;
+    }
+}

@@ -1,0 +1,49 @@
+{{- /*
+  Override of PaperMod's layouts/baseof.html, for accessibility (WCAG 2.2). Changes from the
+  theme's version are marked "a11y"; keep the rest in sync with
+  themes/PaperMod/layouts/baseof.html when updating the theme.
+*/ -}}
+{{- if lt hugo.Version "0.146.0" }}
+{{- errorf "=> hugo v0.146.0 or greater is required for hugo-PaperMod to build " }}
+{{- end -}}
+
+<!DOCTYPE html>
+{{- $theme := site.Params.defaultTheme | default "auto" }}
+{{- if eq $theme "dark" }}
+<html lang="{{ site.Language }}" dir="{{ .Language.LanguageDirection | default "auto" }}" data-theme="dark">
+{{- else if eq $theme "light" }}
+<html lang="{{ site.Language }}" dir="{{ .Language.LanguageDirection | default "auto" }}" data-theme="light">
+{{- else }}
+<html lang="{{ site.Language }}" dir="{{ .Language.LanguageDirection | default "auto" }}" data-theme="auto">
+{{- end }}
+
+<head>
+    {{- partial "head.html" . }}
+</head>
+
+{{- if (or (ne .Kind `page` ) (eq .Layout `archives`) (eq .Layout `search`)) }}
+<body class="list" id="top">
+{{- else }}
+<body id="top">
+{{- end }}
+    {{- /* a11y: WCAG 2.4.1 Bypass Blocks. First focusable element; hidden until focused. */}}
+    <a class="skip-link" href="#main">Skip to content</a>
+    {{- /* a11y: browsers only move the Tab starting point on a fragment jump; moving real
+         focus as well lets screen readers announce the new position. */}}
+    <script>
+        document.querySelector('.skip-link').addEventListener('click', function () {
+            var main = document.getElementById('main');
+            if (main) main.focus();
+        });
+    </script>
+    {{- /* a11y: WCAG 2.2.2 / 2.1.1. Background-animation controls, early in the tab order. */}}
+    {{ partial "scene_controls.html" . }}
+    {{ partialCached "header.html" . .Page -}}
+    {{- /* a11y: id + tabindex=-1 so the skip link moves focus (not just scroll) into main. */}}
+    <main class="main" id="main" tabindex="-1">
+        {{- block "main" . }}{{ end }}
+    </main>
+    {{ partialCached "footer.html" . .Layout .Kind (.Param "hideFooter") (.Param "ShowCodeCopyButtons") -}}
+</body>
+
+</html>

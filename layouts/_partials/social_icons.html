@@ -1,0 +1,14 @@
+{{- /*
+  Override of PaperMod's social_icons.html for accessibility: each icon link gets a real
+  accessible name (WCAG 2.4.4 / 4.1.2) instead of relying on the title tooltip, and says it
+  opens a new tab (WCAG technique G201). The SVG is decorative.
+*/ -}}
+<div class="social-icons" {{ with .align}}align="{{.}}" {{- end }}>
+    {{- range site.Params.socialIcons }}
+    {{- $label := .title | default (.name | title) }}
+    <a href="{{ trim .url " " | safeURL }}" target="_blank" rel="noopener noreferrer me"
+        aria-label="{{ $label }} (opens in new tab)" title="{{ $label }}">
+        <span aria-hidden="true">{{ partial "svg.html" . }}</span>
+    </a>
+    {{- end }}
+</div>
