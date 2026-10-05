@@ -44,10 +44,21 @@ which have a content hash in their names) are cached by browsers for a year, whi
 the RSS feed and the search index are re-checked on every visit so new posts appear at once.
 
 ```sh
+sudo cp deploy/nginx/security-headers.conf /etc/nginx/snippets/nick-vas-security.conf
 sudo cp deploy/nginx/nick-vas.me.conf /etc/nginx/sites-available/nick-vas.me
 sudo ln -s /etc/nginx/sites-available/nick-vas.me /etc/nginx/sites-enabled/
 sudo nginx -t && sudo systemctl reload nginx
 ```
+
+The server block sends security headers (CSP, `X-Content-Type-Options`, `X-Frame-Options`,
+`Referrer-Policy`, `Permissions-Policy`, HSTS) from
+[`deploy/nginx/security-headers.conf`](deploy/nginx/security-headers.conf). That snippet is
+`include`-d inside **each** `location`, not at the server level: nginx only inherits
+`add_header` into a location that sets none of its own, and both locations set
+`Cache-Control`, so headers placed at the server level would be silently dropped on every
+response. Copy the snippet to `/etc/nginx/snippets/nick-vas-security.conf` (first line above)
+before `nginx -t`, or the include fails. Verify the headers reach the wire with
+`curl -sI https://nick-vas.me/ | grep -i -E 'content-security|x-frame|x-content'`.
 
 Add HTTPS with `sudo certbot --nginx -d nick-vas.me -d www.nick-vas.me`.
 
