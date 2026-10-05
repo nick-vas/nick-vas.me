@@ -1,0 +1,135 @@
+/* Modern CSS, all progressive enhancement: browsers without a feature skip it and see the
+   plain PaperMod page. Motion is gated on prefers-reduced-motion (WCAG 2.2.2 / 2.3.3). */
+
+/* Native form controls, scrollbars and the canvas default follow the active theme. */
+:root {
+    color-scheme: light;
+    accent-color: var(--primary);
+}
+
+[data-theme="dark"] {
+    color-scheme: dark;
+}
+
+/* Typography: balanced headings, no one-word last lines in prose. */
+:is(h1, h2, h3, h4, h5, h6),
+.entry-header h2,
+.post-title {
+    text-wrap: balance;
+}
+
+.post-content p,
+.entry-content p,
+.post-description {
+    text-wrap: pretty;
+}
+
+/* Anchored headings land clear of the sticky header. */
+:is(h2, h3, h4)[id] {
+    scroll-margin-top: calc(var(--header-height, 60px) + 16px);
+}
+
+/* Cards: lift when hovered or when anything inside has keyboard focus. */
+.post-entry {
+    transition: transform 0.2s ease, border-color 0.2s ease;
+}
+
+@media (hover: hover) {
+    .post-entry:hover {
+        transform: translateY(-2px);
+    }
+}
+
+.post-entry:has(:focus-visible) {
+    outline: 3px solid var(--primary);
+    outline-offset: 2px;
+}
+
+/* Images in posts: never overflow, reserve space from width/height to avoid layout shift,
+   and skip rendering below-the-fold ones until needed. */
+.post-content img {
+    max-width: 100%;
+    height: auto;
+    border-radius: var(--radius);
+}
+
+.post-content :is(pre, table, figure) {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 300px;
+}
+
+/* Search box grows with what's typed where supported. */
+#searchbox input {
+    field-sizing: content;
+    min-width: 100%;
+}
+
+/* Reading progress bar on posts, driven by scroll position with no JavaScript. */
+@supports (animation-timeline: scroll()) {
+    @media (prefers-reduced-motion: no-preference) {
+        html:not(.sim-rm) body:has(.post-single)::before {
+            content: "";
+            position: fixed;
+            inset: 0 0 auto 0;
+            height: 4px;
+            z-index: 50;
+            background: var(--primary);
+            transform-origin: left;
+            transform: scaleX(0);
+            animation: read-progress linear both;
+            animation-timeline: scroll(root block);
+            pointer-events: none;
+        }
+    }
+}
+
+@keyframes read-progress {
+    to {
+        transform: scaleX(1);
+    }
+}
+
+/* Entries ease in as they scroll into view. */
+@supports (animation-timeline: view()) {
+    @media (prefers-reduced-motion: no-preference) {
+        html:not(.sim-rm) .post-entry {
+            animation: entry-in linear both;
+            animation-timeline: view();
+            animation-range: entry 0% entry 40%;
+        }
+    }
+}
+
+@keyframes entry-in {
+    from {
+        opacity: 0;
+        translate: 0 24px;
+    }
+}
+
+/* .sim-rm comes from the dev-only test panel (layouts/_partials/a11y_test.html). */
+.sim-rm .post-entry {
+    transition: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .post-entry {
+        transition: none;
+    }
+}
+
+@media (forced-colors: active) {
+    body::before {
+        display: none;
+    }
+}
+
+@media print {
+    body::before {
+        display: none;
+    }
+
+    .post-entry {
+        animation: none;
+    }
+}

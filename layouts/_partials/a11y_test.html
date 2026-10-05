@@ -1,0 +1,55 @@
+{{- /*
+  Dev-only accessibility test panel: rendered by `hugo server`, never in a production build.
+  Simulates settings that are awkward to flip in the OS or browser. Choices persist in
+  localStorage and are applied as classes on <html> before first paint (see extend_head.html).
+  - Reduced motion: .sim-rm (read by bg-scene.js and modern.css).
+  - 200% text: WCAG 1.4.4 Resize Text.
+  - Greyscale: check nothing relies on colour alone (WCAG 1.4.1).
+  - Outline everything: see layout, focus order targets and hidden overflow.
+*/ -}}
+{{- if hugo.IsServer }}
+<style>
+    .sim-text { font-size: 200%; }
+    .sim-gray { filter: grayscale(1); }
+    .sim-outline * { outline: 1px solid rgba(255, 0, 100, .6) !important; }
+    #a11y-test { position: fixed; right: 16px; bottom: 16px; z-index: 1000; font: 14px/1.4 system-ui, sans-serif;
+        text-shadow: none; }
+    #a11y-test summary { cursor: pointer; padding: 8px 12px; border-radius: 8px; background: #6b21a8; color: #fff;
+        list-style: none; user-select: none; }
+    #a11y-test form { margin-top: 6px; padding: 10px 12px; border-radius: 8px; background: #fff; color: #111;
+        border: 1px solid #999; display: grid; gap: 6px; }
+    #a11y-test label { display: flex; gap: 8px; align-items: center; cursor: pointer; }
+    #a11y-test, #a11y-test * { outline-color: #6b21a8; }
+</style>
+<details id="a11y-test">
+    <summary>A11y test</summary>
+    <form>
+        <label><input type="checkbox" data-sim="sim-rm"> Reduced motion</label>
+        <label><input type="checkbox" data-sim="sim-text"> 200% text</label>
+        <label><input type="checkbox" data-sim="sim-gray"> Greyscale</label>
+        <label><input type="checkbox" data-sim="sim-outline"> Outline everything</label>
+    </form>
+</details>
+<script>
+    (function () {
+        var KEY = 'a11y-test', root = document.documentElement;
+        var on = {};
+        try { on = JSON.parse(localStorage.getItem(KEY)) || {}; } catch (e) { }
+        document.querySelectorAll('#a11y-test input').forEach(function (box) {
+            var cls = box.dataset.sim;
+            box.checked = !!on[cls];
+            box.addEventListener('change', function () {
+                on[cls] = box.checked;
+                try { localStorage.setItem(KEY, JSON.stringify(on)); } catch (e) { }
+                root.classList.toggle(cls, box.checked);
+                // The scene reads its motion setting once at start-up: forget the saved
+                // pause choice and reload so the new setting takes effect.
+                if (cls === 'sim-rm') {
+                    try { localStorage.removeItem('bg-motion'); } catch (e) { }
+                    location.reload();
+                }
+            });
+        });
+    })();
+</script>
+{{- end }}

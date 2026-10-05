@@ -35,12 +35,13 @@ if (canvas) init(canvas);
 
 function init(canvas) {
   const quiet = canvas.classList.contains('is-quiet');
-  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  // WCAG 2.2.2 (Pause, Stop, Hide): the animation can be paused with the button in
-  // baseof.html. The choice is remembered across pages; with no saved choice, the OS
-  // "reduce motion" setting starts it paused.
+  // The animation plays by default, even when the OS asks for reduced motion (a deliberate
+  // choice for this site). WCAG 2.2.2 (Pause, Stop, Hide) is met by the pause button in
+  // baseof.html; the choice is remembered across pages. Only the dev-only test panel's
+  // sim-rm class starts it paused with no saved choice.
+  const startPaused = document.documentElement.classList.contains('sim-rm');
   const MOTION_KEY = 'bg-motion';
-  let paused = loadMotionPref() ?? reduceMotion;
+  let paused = loadMotionPref() ?? startPaused;
   function loadMotionPref() {
     try {
       const v = localStorage.getItem(MOTION_KEY);

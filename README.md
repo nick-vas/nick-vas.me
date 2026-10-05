@@ -112,7 +112,7 @@ elsewhere, and the current shape carries over as you move between pages.
 - The canvas has `pointer-events: none`, so it never blocks links, buttons or text
   selection. Clicks on links, buttons, code, post cards, the header and the footer are
   ignored, as are clicks that end a text selection.
-- It honours "reduce motion" (shows a still frame), pauses when the tab is hidden,
+- It plays by default even with "reduce motion" set (a deliberate choice; the pause button is the control), pauses when the tab is hidden,
   and is skipped entirely if WebGL is unavailable.
 - A shatter carries over between pages: the shard state is saved to `sessionStorage`
   when you leave a page and restored (fast-forwarded by the time the navigation took)
@@ -136,7 +136,7 @@ cover what the theme doesn't, mainly around the animated background.
 
 | WCAG | What | Where |
 | --- | --- | --- |
-| 2.2.2 Pause, Stop, Hide | Pause button for the background animation, remembered across pages; the paused pose is identical on every page. With no saved choice, the OS "reduce motion" setting starts it paused (and still lets the visitor press play). Nothing animates in Windows High Contrast. | `layouts/_partials/scene_controls.html`, `assets/js/bg-scene.js` |
+| 2.2.2 Pause, Stop, Hide | Pause button for the background animation, remembered across pages; the paused pose is identical on every page. The animation plays by default, including when the OS "reduce motion" setting is on. Nothing animates in Windows High Contrast. | `layouts/_partials/scene_controls.html`, `assets/js/bg-scene.js` |
 | 2.1.1 Keyboard | The shatter is also a button, so it isn't mouse-only. | same |
 | 2.3.1 Three Flashes | Shard spin is capped at one turn per second, so a shard swaps its rainbow face for the complementary one at most twice a second, however fast someone clicks. | `bg-scene.js` (`MAX_SPIN`) |
 | 1.4.3 Contrast | Shards passing behind text never reduce its contrast. Short text (header, home intro, titles, footer) gets a halo in the page's own background colour; long-form text (post bodies, archive lists) sits on blocks of the page colour instead, which costs nothing to paint (a halo on every glyph of a long post measured ~20x the scroll raster work). Theme containers that clip overflow are widened so the halo isn't cut off. Dark-mode post tags raised from 4.24:1 to 6.8:1. | `assets/css/extended/a11y.css` |
