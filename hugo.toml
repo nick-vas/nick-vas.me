@@ -1,0 +1,82 @@
+baseURL = "https://nick-vas.me/"
+locale = "en-US"
+title = "nick-vas.me"
+theme = "PaperMod"
+
+enableRobotsTXT = true
+buildDrafts = false
+buildFuture = false
+
+[pagination]
+  pagerSize = 10
+
+[minify]
+  disableXML = true
+
+# RSS for the home page and sections, JSON index for the search page.
+[outputs]
+  home = ["HTML", "RSS", "JSON"]
+
+[params]
+  env = "production"
+  title = "nick-vas.me"
+  description = "Personal site and blog of Nick Vas."
+  author = "Nick Vas"
+  defaultTheme = "auto"
+  disableThemeToggle = false
+
+  ShowReadingTime = true
+  ShowShareButtons = false
+  ShowPostNavLinks = true
+  ShowBreadCrumbs = true
+  ShowCodeCopyButtons = true
+  ShowRssButtonInSectionTermList = true
+  ShowToc = true
+  TocOpen = false
+
+  # Home page: short intro on top, latest posts below.
+  [params.homeInfoParams]
+    Title = "Hi, I'm Nick 👋"
+    Content = "Welcome to my corner of the web. More about me on the [about](/about/) page; latest posts below."
+
+  [[params.socialIcons]]
+    name = "github"
+    url = "https://github.com/nick-vas"
+
+  [[params.socialIcons]]
+    name = "rss"
+    url = "/index.xml"
+
+  [params.fuseOpts]
+    isCaseSensitive = false
+    shouldSort = true
+    location = 0
+    distance = 1000
+    threshold = 0.4
+    minMatchCharLength = 0
+    keys = ["title", "permalink", "summary", "content"]
+
+[menu]
+  [[menu.main]]
+    identifier = "posts"
+    name = "Posts"
+    url = "/posts/"
+    weight = 10
+  [[menu.main]]
+    identifier = "archives"
+    name = "Archive"
+    url = "/archives/"
+    weight = 20
+  [[menu.main]]
+    identifier = "search"
+    name = "Search"
+    url = "/search/"
+    weight = 30
+  [[menu.main]]
+    identifier = "about"
+    name = "About"
+    url = "/about/"
+    weight = 40
+
+[markup.highlight]
+  noClasses = false
