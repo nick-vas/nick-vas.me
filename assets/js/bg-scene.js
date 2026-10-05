@@ -3,6 +3,7 @@
 // Runs behind every page. The canvas never takes pointer events; clicks are read
 // from the window and ignored when they land on anything interactive.
 import {
+  BackSide,
   BoxGeometry,
   BufferAttribute,
   BufferGeometry,
@@ -10,7 +11,7 @@ import {
   ConeGeometry,
   DirectionalLight,
   DodecahedronGeometry,
-  DoubleSide,
+  FrontSide,
   Group,
   HemisphereLight,
   IcosahedronGeometry,
@@ -46,6 +47,8 @@ function init(canvas) {
     stiffness: 1.4,
     spinBurst: 9,
     hoverLean: 0.35,
+    hueSpan: 0.85, // how much of the spectrum the gradient covers, top to bottom
+    hueDrift: 0.015, // spectrum turns per second
   };
 
   let renderer;
@@ -82,23 +85,33 @@ function init(canvas) {
 
   const N = CFG.shards;
   const positions = new Float32Array(N * 9);
-  const colors = new Float32Array(N * 9);
-  const geometry = new BufferGeometry();
-  geometry.setAttribute('position', new BufferAttribute(positions, 3));
-  geometry.setAttribute('color', new BufferAttribute(colors, 3));
-  const material = new MeshStandardMaterial({
+  const frontColors = new Float32Array(N * 9);
+  const backColors = new Float32Array(N * 9);
+  // Two meshes share the vertex positions: outer faces get the rainbow, inner faces the
+  // complementary hue, so tumbling shards flash between a colour and its complement.
+  const positionAttr = new BufferAttribute(positions, 3);
+  const frontGeometry = new BufferGeometry();
+  frontGeometry.setAttribute('position', positionAttr);
+  frontGeometry.setAttribute('color', new BufferAttribute(frontColors, 3));
+  const backGeometry = new BufferGeometry();
+  backGeometry.setAttribute('position', positionAttr);
+  backGeometry.setAttribute('color', new BufferAttribute(backColors, 3));
+  const materialOptions = {
     vertexColors: true,
     flatShading: true,
-    roughness: 0.45,
-    metalness: 0.2,
-    side: DoubleSide,
+    roughness: 0.4,
+    metalness: 0.15,
     transparent: true,
     opacity: 0.95,
-  });
-  const mesh = new Mesh(geometry, material);
-  mesh.frustumCulled = false;
+  };
+  const frontMaterial = new MeshStandardMaterial({ ...materialOptions, side: FrontSide });
+  const backMaterial = new MeshStandardMaterial({ ...materialOptions, side: BackSide });
   const group = new Group();
-  group.add(mesh);
+  for (const [g, m] of [[frontGeometry, frontMaterial], [backGeometry, backMaterial]]) {
+    const mesh = new Mesh(g, m);
+    mesh.frustumCulled = false;
+    group.add(mesh);
+  }
   scene.add(group);
 
   // Scratch objects shared by the simulation and vertex writer.
@@ -146,28 +159,38 @@ function init(canvas) {
     writeVertices();
   }
 
-  // ---- Theme ----
-  const PALETTES = {
-    dark: { a: '#4f5d7a', b: '#8a96b4', accent: '#8fb0ff' },
-    light: { a: '#9aa6bf', b: '#d2d8e4', accent: '#4566d6' },
+  // ---- Colour: a rainbow gradient with complementary inner faces ----
+  // Saturation/lightness per theme; the site defaults to dark.
+  const TONES = {
+    dark: { s: 0.92, l: 0.52, backL: 0.45 },
+    light: { s: 0.85, l: 0.48, backL: 0.42 },
   };
+  let tone = TONES.dark;
   const accent = new Color();
+  const tint = new Color();
   function applyTheme() {
-    const p = PALETTES[document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light'];
-    const a = new Color(p.a);
-    const b = new Color(p.b);
-    const c = new Color();
-    accent.set(p.accent);
+    const dark = document.documentElement.dataset.theme !== 'light';
+    tone = dark ? TONES.dark : TONES.light;
+    hemi.groundColor.set(dark ? 0x2a3040 : 0x9aa4b8);
+  }
+  function paint(t) {
+    // Shards are ordered top to bottom, so hue runs down the shape like a rainbow,
+    // and the whole spectrum slowly turns over time.
+    const drift = (t * CFG.hueDrift) % 1;
     for (let i = 0; i < N; i++) {
-      // Shards are ordered top to bottom, so this is a soft vertical gradient on every shape.
-      c.copy(a).lerp(b, 1 - i / N).offsetHSL(0, 0, (rand() - 0.5) * 0.02);
-      for (let v = 0; v < 3; v++) colors.set([c.r, c.g, c.b], i * 9 + v * 3);
+      const h = (drift + (i / N) * CFG.hueSpan) % 1;
+      tint.setHSL(h, tone.s, tone.l);
+      for (let v = 0; v < 3; v++) tint.toArray(frontColors, i * 9 + v * 3);
+      tint.setHSL((h + 0.5) % 1, tone.s, tone.backL);
+      for (let v = 0; v < 3; v++) tint.toArray(backColors, i * 9 + v * 3);
     }
-    geometry.attributes.color.needsUpdate = true;
-    hemi.groundColor.set(document.documentElement.dataset.theme === 'dark' ? 0x2a3040 : 0x9aa4b8);
+    frontGeometry.attributes.color.needsUpdate = true;
+    backGeometry.attributes.color.needsUpdate = true;
+    // Hover glow uses the complement of the shape's middle colour.
+    accent.setHSL((drift + CFG.hueSpan / 2 + 0.5) % 1, 0.9, 0.6);
   }
   applyTheme();
-  new MutationObserver(() => { applyTheme(); if (reduceMotion) render(); })
+  new MutationObserver(() => { applyTheme(); if (reduceMotion) { paint(clock()); render(); } })
     .observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
 
   // ---- Layout ----
@@ -295,7 +318,7 @@ function init(canvas) {
         positions[j + 2] = pos[i * 3 + 2] + v3.z;
       }
     }
-    geometry.attributes.position.needsUpdate = true;
+    positionAttr.needsUpdate = true;
   }
 
   // Wall-clock time keeps the hover motion in phase across page loads.
@@ -321,17 +344,19 @@ function init(canvas) {
       Math.sin(t * 0.17) * 0.12,
     );
     group.scale.setScalar(radius * (1 + glow * 0.04));
-    material.emissive.copy(accent).multiplyScalar(glow * 0.25);
+    frontMaterial.emissive.copy(accent).multiplyScalar(glow * 0.3);
+    backMaterial.emissive.copy(frontMaterial.emissive);
   }
 
   function render() {
     renderer.render(scene, camera);
   }
 
-  window.addEventListener('resize', () => { resize(); if (reduceMotion) { place(clock(), 0); render(); } }, { passive: true });
+  window.addEventListener('resize', () => { resize(); if (reduceMotion) { paint(clock()); place(clock(), 0); render(); } }, { passive: true });
 
   if (reduceMotion) {
     // Respect the OS setting: a still image, no animation or interaction.
+    paint(clock());
     place(clock(), 0);
     render();
     return;
@@ -359,7 +384,9 @@ function init(canvas) {
     raf = requestAnimationFrame(frame);
     const dt = Math.min((now - last) / 1000 || 0, 1 / 30);
     last = now;
-    place(clock(), dt);
+    const t = clock();
+    place(t, dt);
+    paint(t);
     if (!whole) {
       step(dt);
       if (!whole) writeVertices();

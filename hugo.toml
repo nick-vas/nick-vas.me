@@ -22,7 +22,7 @@ buildFuture = false
   title = "nick-vas.me"
   description = "Personal site and blog of Nick Vas."
   author = "Nick Vas"
-  defaultTheme = "auto"
+  defaultTheme = "dark"
   disableThemeToggle = false
 
   ShowReadingTime = true
