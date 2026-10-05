@@ -44,7 +44,7 @@ function init(canvas) {
     burst: quiet ? 2.6 : 3.4, // initial shard speed, in shape radii per second
     holdSeconds: 0.9, // drift freely before the pull back starts
     regatherSeconds: 6, // time for the pull to ramp to full strength
-    stiffness: 1.4,
+    stiffness: 2.5,
     spinBurst: 9,
     hoverLean: 0.35,
     hueSpan: 0.85, // how much of the spectrum the gradient covers, top to bottom
@@ -127,6 +127,10 @@ function init(canvas) {
   const quat = new Float32Array(N * 4);
   const angVel = new Float32Array(N * 3);
   const recover = new Float32Array(N).fill(1);
+  // Kept apart from `recover` so a second click mid-regather never makes shards jump:
+  // morph only moves forward, and the shard size eases instead of resetting.
+  const morph = new Float32Array(N).fill(1); // 0 = old shape's triangle, 1 = new shape's
+  const gap = new Float32Array(N).fill(1); // shard scale; < 1 while scattered
 
   // Remember which shape we're on as the reader moves between pages.
   let from = loadShape();
@@ -154,6 +158,8 @@ function init(canvas) {
     angVel.fill(0);
     for (let k = 0; k < N; k++) quat.set([0, 0, 0, 1], k * 4);
     recover.fill(1);
+    morph.fill(1);
+    gap.fill(1);
     from = to = i;
     whole = true;
     writeVertices();
@@ -239,6 +245,7 @@ function init(canvas) {
       from = to;
       to = (to + 1) % SHAPES.length;
       saveShape(to);
+      morph.fill(0);
       whole = false;
     }
     for (let i = 0; i < N; i++) {
@@ -258,17 +265,20 @@ function init(canvas) {
   }
 
   // ---- Simulation ----
+  const SETTLE_DIST = 0.002; // shape radii (sum of |dx|+|dy|+|dz|)
+  const SETTLE_SPEED = 0.01;
   function step(dt) {
     const K = CFG.stiffness;
     const critical = 2 * Math.sqrt(K);
     const target = SHAPES[to].centroids;
-    let allRecovered = true;
+    let settled = true;
 
     for (let i = 0; i < N; i++) {
       const ix = i * 3;
       recover[i] = Math.min(1, recover[i] + dt / CFG.regatherSeconds);
       const r = smoothstep(clamp(recover[i], 0, 1));
-      if (recover[i] < 1) allRecovered = false;
+      morph[i] = Math.max(morph[i], r);
+      gap[i] += (0.55 + 0.45 * r - gap[i]) * Math.min(1, dt * 4);
       const k = K * r * r;
       const damping = 0.35 + (critical - 0.35) * r;
 
@@ -292,21 +302,28 @@ function init(canvas) {
       angVel[ix + 2] *= decay;
       q.slerp(ident, 1 - Math.exp(-dt * 3 * r * r));
       q.toArray(quat, i * 4);
+
+      if (settled && (
+        recover[i] < 1 ||
+        Math.abs(target[ix] - pos[ix]) + Math.abs(target[ix + 1] - pos[ix + 1]) + Math.abs(target[ix + 2] - pos[ix + 2]) > SETTLE_DIST ||
+        Math.abs(vel[ix]) + Math.abs(vel[ix + 1]) + Math.abs(vel[ix + 2]) > SETTLE_SPEED ||
+        Math.abs(q.w) < 0.9999 ||
+        gap[i] < 0.999
+      )) settled = false;
     }
 
-    if (allRecovered) {
-      settleTimer += dt;
-      if (settleTimer > 1.2) resetToWhole(to);
-    }
+    // Lock into a solid shape only once every shard has actually arrived, so the switch
+    // from shards to whole is invisible. The timeout is a safety net, not the normal path.
+    settleTimer += dt;
+    if (settled || settleTimer > CFG.holdSeconds + CFG.regatherSeconds + 20) resetToWhole(to);
   }
 
   function writeVertices() {
     const A = SHAPES[from].locals;
     const B = SHAPES[to].locals;
     for (let i = 0; i < N; i++) {
-      const r = whole ? 1 : smoothstep(clamp(recover[i], 0, 1));
-      const m = whole ? 1 : r; // morph each shard from the old shape's triangle to the new one's
-      const shrink = whole ? 1 : 0.55 + 0.45 * r; // gaps open up while scattered
+      const m = whole ? 1 : morph[i]; // morph each shard from the old shape's triangle to the new one's
+      const shrink = whole ? 1 : gap[i]; // gaps open up while scattered
       q.fromArray(quat, i * 4);
       for (let v = 0; v < 3; v++) {
         const j = i * 9 + v * 3;
