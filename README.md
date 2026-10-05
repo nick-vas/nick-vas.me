@@ -51,9 +51,12 @@ Add HTTPS with `sudo certbot --nginx -d nick-vas.me -d www.nick-vas.me`.
 
 ## Background scene
 
-Every page has a Three.js background of floating shapes (`assets/js/bg-scene.js`).
-Clicking empty space scatters the nearby shapes and they slowly regather; the cursor
-gently pushes them aside. It is full strength on the home page and dimmed elsewhere.
+Every page has a Three.js background (`assets/js/bg-scene.js`): one primitive at a time
+hovers and slowly turns. Clicking empty space shatters it into its own triangle shards,
+which drift apart and slowly regather as the next primitive (icosahedron, cube, torus
+knot, octahedron, torus, dodecahedron, tetrahedron, cone, then round again). The cursor
+makes the shape lean and glow. It is full strength on the home page and dimmed
+elsewhere, and the current shape carries over as you move between pages.
 
 - The canvas has `pointer-events: none`, so it never blocks links, buttons or text
   selection. Clicks on links, buttons, code, post cards, the header and the footer are
@@ -62,9 +65,10 @@ gently pushes them aside. It is full strength on the home page and dimmed elsewh
   and is skipped entirely if WebGL is unavailable.
 - Three.js r186 is vendored in `assets/js/vendor/` (MIT, see `three.LICENSE`) and
   bundled by Hugo, so the site makes no third-party requests.
-- Tune it via the `CFG` block at the top of `bg-scene.js` (burst strength, regather
-  time, hover force) and the `PALETTES` colours. Page dimming is in
-  `assets/css/extended/bg-scene.css`.
+- Tune it via the `CFG` block at the top of `bg-scene.js` (burst strength, hold and
+  regather time, shard count), the `SHAPES` list and the `PALETTES` colours. To reform
+  the same shape instead of the next one, change `to = (to + 1) % SHAPES.length` to
+  `to = from` in `shatter()`. Page dimming is in `assets/css/extended/bg-scene.css`.
 
 ## Updating the theme
 

@@ -1,25 +1,31 @@
-// Background scene: floating primitives that scatter on click and slowly regather.
+// Background scene: one primitive hovers at a time. A click shatters it into its own
+// triangle shards, which drift apart and slowly regather as the next primitive.
 // Runs behind every page. The canvas never takes pointer events; clicks are read
 // from the window and ignored when they land on anything interactive.
 import {
   BoxGeometry,
+  BufferAttribute,
+  BufferGeometry,
   Color,
   ConeGeometry,
   DirectionalLight,
   DodecahedronGeometry,
-  Fog,
+  DoubleSide,
+  Group,
   HemisphereLight,
   IcosahedronGeometry,
-  InstancedMesh,
+  Mesh,
   MeshStandardMaterial,
-  Object3D,
   OctahedronGeometry,
   PerspectiveCamera,
+  Quaternion,
   Raycaster,
   Scene,
   TetrahedronGeometry,
   TorusGeometry,
+  TorusKnotGeometry,
   Vector2,
+  Vector3,
   WebGLRenderer,
 } from './vendor/three.module.js';
 
@@ -31,17 +37,15 @@ function init(canvas) {
   const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   const CFG = {
-    fov: 50,
+    fov: 40,
     camZ: 14,
-    nearZ: 3,
-    farZ: -9,
-    stiffness: 1.1, // spring pull back to home once fully recovered
-    regatherSeconds: 5, // time for the pull to ramp back to full strength
-    burst: quiet ? 9 : 14, // click impulse
-    burstRadius: quiet ? 3.2 : 4.2,
-    hoverRadius: 1.8,
-    hoverForce: quiet ? 6 : 16,
-    bob: 0.35,
+    shards: 768, // every primitive is cut into exactly this many triangles
+    burst: quiet ? 2.6 : 3.4, // initial shard speed, in shape radii per second
+    holdSeconds: 0.9, // drift freely before the pull back starts
+    regatherSeconds: 6, // time for the pull to ramp to full strength
+    stiffness: 1.4,
+    spinBurst: 9,
+    hoverLean: 0.35,
   };
 
   let renderer;
@@ -55,261 +59,280 @@ function init(canvas) {
   renderer.setClearColor(0x000000, 0);
 
   const scene = new Scene();
-  scene.fog = new Fog(0x000000, CFG.camZ - 2, CFG.camZ + 16);
   const camera = new PerspectiveCamera(CFG.fov, 1, 0.1, 100);
   camera.position.set(0, 0, CFG.camZ);
-
-  const hemi = new HemisphereLight(0xffffff, 0x445066, 1.3);
-  const sun = new DirectionalLight(0xffffff, 1.6);
-  sun.position.set(6, 9, 12);
+  const hemi = new HemisphereLight(0xffffff, 0x445066, 1.4);
+  const sun = new DirectionalLight(0xffffff, 1.8);
+  sun.position.set(5, 8, 10);
   scene.add(hemi, sun);
 
-  // Same seed on every page, so the formation is identical as you navigate.
   const rand = mulberry32(20261005);
 
-  const geometries = [
-    new IcosahedronGeometry(0.55, 0),
-    new BoxGeometry(0.75, 0.75, 0.75),
-    new OctahedronGeometry(0.6, 0),
-    new TetrahedronGeometry(0.7, 0),
-    new DodecahedronGeometry(0.55, 0),
-    new TorusGeometry(0.45, 0.16, 8, 20),
-    new ConeGeometry(0.45, 0.85, 6),
-  ];
+  // ---- Shapes: each normalised to radius 1 and cut into exactly CFG.shards triangles ----
+  const SHAPES = [
+    () => new IcosahedronGeometry(1, 1),
+    () => new BoxGeometry(1.25, 1.25, 1.25, 2, 2, 2),
+    () => new TorusKnotGeometry(0.72, 0.24, 48, 8),
+    () => new OctahedronGeometry(1, 1),
+    () => new TorusGeometry(0.78, 0.3, 8, 24),
+    () => new DodecahedronGeometry(1, 0),
+    () => new TetrahedronGeometry(1.1, 0),
+    () => new ConeGeometry(0.85, 1.5, 24, 1),
+  ].map((make) => buildShards(make(), CFG.shards));
 
-  const area = window.innerWidth * window.innerHeight;
-  const count = clamp(Math.round(area / 15000), 32, 110);
+  const N = CFG.shards;
+  const positions = new Float32Array(N * 9);
+  const colors = new Float32Array(N * 9);
+  const geometry = new BufferGeometry();
+  geometry.setAttribute('position', new BufferAttribute(positions, 3));
+  geometry.setAttribute('color', new BufferAttribute(colors, 3));
+  const material = new MeshStandardMaterial({
+    vertexColors: true,
+    flatShading: true,
+    roughness: 0.45,
+    metalness: 0.2,
+    side: DoubleSide,
+    transparent: true,
+    opacity: 0.95,
+  });
+  const mesh = new Mesh(geometry, material);
+  mesh.frustumCulled = false;
+  const group = new Group();
+  group.add(mesh);
+  scene.add(group);
 
-  // Per-shape state in flat arrays.
-  const type = new Uint8Array(count);
-  const slot = new Uint16Array(count);
-  const home = new Float32Array(count * 3); // x/y normalised to the viewport, z in world units
-  const pos = new Float32Array(count * 3);
-  const vel = new Float32Array(count * 3);
-  const rot = new Float32Array(count * 3);
-  const spin = new Float32Array(count * 3);
-  const extraSpin = new Float32Array(count * 3);
-  const phase = new Float32Array(count);
-  const freq = new Float32Array(count);
-  const size = new Float32Array(count);
-  const recover = new Float32Array(count).fill(1); // 0 = just scattered, 1 = fully gathered
-  const tint = new Uint8Array(count);
-  const glow = new Float32Array(count);
+  // Scratch objects shared by the simulation and vertex writer.
+  const q = new Quaternion();
+  const dq = new Quaternion();
+  const ident = new Quaternion();
+  const axis = new Vector3();
+  const v3 = new Vector3();
 
-  const perType = new Array(geometries.length).fill(0);
-  for (let i = 0; i < count; i++) {
-    const t = Math.floor(rand() * geometries.length);
-    type[i] = t;
-    slot[i] = perType[t]++;
+  // ---- Shard state (in the group's local space, radius-1 units) ----
+  const pos = new Float32Array(N * 3);
+  const vel = new Float32Array(N * 3);
+  const quat = new Float32Array(N * 4);
+  const angVel = new Float32Array(N * 3);
+  const recover = new Float32Array(N).fill(1);
 
-    // Bias shapes slightly toward the sides so the reading column stays calmer.
-    const hx = rand() * 2 - 1;
-    home[i * 3] = Math.sign(hx) * Math.pow(Math.abs(hx), 0.75);
-    home[i * 3 + 1] = rand() * 2 - 1;
-    home[i * 3 + 2] = lerp(CFG.farZ, CFG.nearZ, Math.pow(rand(), 1.4));
+  // Remember which shape we're on as the reader moves between pages.
+  let from = loadShape();
+  let to = from;
+  let whole = true; // shards locked together into a solid shape
+  let settleTimer = 0;
+  resetToWhole(from);
 
-    for (let k = 0; k < 3; k++) {
-      rot[i * 3 + k] = rand() * Math.PI * 2;
-      spin[i * 3 + k] = (rand() - 0.5) * 0.5;
+  function loadShape() {
+    try {
+      const v = parseInt(sessionStorage.getItem('bg-scene-shape'), 10);
+      return Number.isInteger(v) && v >= 0 && v < SHAPES.length ? v : 0;
+    } catch (err) {
+      return 0;
     }
-    phase[i] = rand() * Math.PI * 2;
-    freq[i] = 0.25 + rand() * 0.35;
-    size[i] = 0.55 + rand() * 0.7;
-    tint[i] = Math.floor(rand() * 4);
+  }
+  function saveShape(i) {
+    try { sessionStorage.setItem('bg-scene-shape', String(i)); } catch (err) { /* private mode */ }
   }
 
-  const material = new MeshStandardMaterial({
-    color: 0xffffff,
-    flatShading: true,
-    roughness: 0.5,
-    metalness: 0.15,
-    transparent: true,
-    opacity: 0.92,
-  });
-  const meshes = geometries.map((g, t) => {
-    const m = new InstancedMesh(g, material, Math.max(perType[t], 1));
-    m.count = perType[t];
-    m.frustumCulled = false;
-    scene.add(m);
-    return m;
-  });
+  function resetToWhole(i) {
+    const s = SHAPES[i];
+    pos.set(s.centroids);
+    vel.fill(0);
+    angVel.fill(0);
+    for (let k = 0; k < N; k++) quat.set([0, 0, 0, 1], k * 4);
+    recover.fill(1);
+    from = to = i;
+    whole = true;
+    writeVertices();
+  }
 
-  // Palettes follow PaperMod's light/dark toggle. Index 4 is the hover/accent colour.
+  // ---- Theme ----
   const PALETTES = {
-    dark: ['#56627a', '#6b7894', '#7f8aa3', '#4a5468', '#8fb0ff'],
-    light: ['#b6bfd0', '#a2acc0', '#c7cdd9', '#8e99b0', '#4566d6'],
+    dark: { a: '#4f5d7a', b: '#8a96b4', accent: '#8fb0ff' },
+    light: { a: '#9aa6bf', b: '#d2d8e4', accent: '#4566d6' },
   };
-  let palette = [];
+  const accent = new Color();
   function applyTheme() {
-    const dark = document.documentElement.dataset.theme === 'dark';
-    palette = PALETTES[dark ? 'dark' : 'light'].map((c) => new Color(c));
-    // Fade distant shapes into the actual page background.
-    const bg = getComputedStyle(document.body).backgroundColor;
-    try { scene.fog.color.setStyle(bg); } catch (err) { scene.fog.color.set(dark ? 0x1d1e20 : 0xffffff); }
-    hemi.groundColor.set(dark ? 0x2a3040 : 0x9aa4b8);
+    const p = PALETTES[document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light'];
+    const a = new Color(p.a);
+    const b = new Color(p.b);
+    const c = new Color();
+    accent.set(p.accent);
+    for (let i = 0; i < N; i++) {
+      // Shards are ordered top to bottom, so this is a soft vertical gradient on every shape.
+      c.copy(a).lerp(b, 1 - i / N).offsetHSL(0, 0, (rand() - 0.5) * 0.02);
+      for (let v = 0; v < 3; v++) colors.set([c.r, c.g, c.b], i * 9 + v * 3);
+    }
+    geometry.attributes.color.needsUpdate = true;
+    hemi.groundColor.set(document.documentElement.dataset.theme === 'dark' ? 0x2a3040 : 0x9aa4b8);
   }
   applyTheme();
   new MutationObserver(() => { applyTheme(); if (reduceMotion) render(); })
     .observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
 
-  // Viewport helpers: homes are stored normalised and mapped to the visible area at each depth,
-  // so the field always fills the screen whatever its size.
-  let aspect = 1;
-  function halfHeightAt(z) {
-    return Math.tan((CFG.fov * Math.PI) / 360) * (CFG.camZ - z);
-  }
+  // ---- Layout ----
+  let radius = 2;
+  let homeX = 0;
   function resize() {
     const w = window.innerWidth;
     const h = window.innerHeight;
-    aspect = w / h;
     renderer.setSize(w, h, false);
-    camera.aspect = aspect;
+    camera.aspect = w / h;
     camera.updateProjectionMatrix();
+    const halfH = Math.tan((CFG.fov * Math.PI) / 360) * CFG.camZ;
+    const halfW = halfH * camera.aspect;
+    // On wide screens sit to the right of the reading column; otherwise centre it.
+    const wide = camera.aspect > 1.25;
+    homeX = wide ? halfW * 0.5 : 0;
+    radius = Math.min(halfH * (wide ? 0.42 : 0.34), halfW * (wide ? 0.32 : 0.6));
   }
   resize();
 
-  // Wall-clock time keeps the bobbing in phase across page loads.
-  const clock = () => (Date.now() / 1000) % 100000;
-
-  function target(i, t, out) {
-    const z = home[i * 3 + 2];
-    const hh = halfHeightAt(z) * 1.05;
-    const p = phase[i];
-    const f = freq[i];
-    out[0] = home[i * 3] * hh * aspect + Math.cos(t * f * 0.7 + p) * CFG.bob * 0.6;
-    out[1] = home[i * 3 + 1] * hh + Math.sin(t * f + p) * CFG.bob;
-    out[2] = z + Math.sin(t * f * 0.5 + p * 2) * CFG.bob * 0.5;
-  }
-
-  const tmp = [0, 0, 0];
-  const t0 = clock();
-  for (let i = 0; i < count; i++) {
-    target(i, t0, tmp);
-    pos[i * 3] = tmp[0];
-    pos[i * 3 + 1] = tmp[1];
-    pos[i * 3 + 2] = tmp[2];
-  }
-
-  // Pointer → world-space ray.
+  // ---- Pointer ----
   const raycaster = new Raycaster();
   const ndc = new Vector2();
   let hovering = false;
-  function rayPointAtZ(z, out) {
-    const o = raycaster.ray.origin;
-    const d = raycaster.ray.direction;
-    const s = (z - o.z) / d.z;
-    out[0] = o.x + d.x * s;
-    out[1] = o.y + d.y * s;
-  }
-  function setPointer(x, y) {
+  const lean = new Vector2();
+  let glow = 0;
+
+  function pointOnShapePlane(x, y, out) {
     ndc.set((x / window.innerWidth) * 2 - 1, -(y / window.innerHeight) * 2 + 1);
     raycaster.setFromCamera(ndc, camera);
+    const o = raycaster.ray.origin;
+    const d = raycaster.ray.direction;
+    const s = (group.position.z - o.z) / d.z;
+    return out.set(o.x + d.x * s, o.y + d.y * s, group.position.z);
   }
 
   const IGNORE = 'a, button, input, textarea, select, label, summary, details, [role="button"], [contenteditable], pre, code, img, video, iframe, .post-entry, .toc, .header, .footer';
 
-  function scatter(x, y) {
-    setPointer(x, y);
-    const p = [0, 0];
-    const r2 = CFG.burstRadius * CFG.burstRadius;
-    for (let i = 0; i < count; i++) {
-      const ix = i * 3;
-      rayPointAtZ(pos[ix + 2], p);
-      let dx = pos[ix] - p[0];
-      let dy = pos[ix + 1] - p[1];
-      let d = Math.hypot(dx, dy);
-      const falloff = Math.exp(-(d * d) / r2);
-      if (falloff < 0.04) continue;
-      if (d < 1e-3) { dx = rand() - 0.5; dy = rand() - 0.5; d = Math.hypot(dx, dy); }
-      const impulse = CFG.burst * falloff * (0.7 + rand() * 0.6);
-      vel[ix] += (dx / d) * impulse;
-      vel[ix + 1] += (dy / d) * impulse;
-      vel[ix + 2] += (rand() - 0.3) * impulse * 0.8;
-      for (let k = 0; k < 3; k++) extraSpin[ix + k] += (rand() - 0.5) * 10 * falloff;
-      recover[i] = Math.min(recover[i], 1 - falloff);
+  function shatter(x, y) {
+    // Click point in the shape's local frame: shards fly out from the centre, pushed away from the click.
+    const local = group.worldToLocal(pointOnShapePlane(x, y, v3));
+    const lx = local.x * 0.35;
+    const ly = local.y * 0.35;
+    const lz = local.z * 0.35;
+    if (whole) {
+      from = to;
+      to = (to + 1) % SHAPES.length;
+      saveShape(to);
+      whole = false;
     }
+    for (let i = 0; i < N; i++) {
+      const ix = i * 3;
+      let dx = pos[ix] - lx;
+      let dy = pos[ix + 1] - ly;
+      let dz = pos[ix + 2] - lz;
+      const d = Math.hypot(dx, dy, dz) || 1;
+      const speed = CFG.burst * (0.45 + rand() * 0.9);
+      vel[ix] += (dx / d) * speed;
+      vel[ix + 1] += (dy / d) * speed;
+      vel[ix + 2] += (dz / d) * speed * 0.35; // mostly in-plane, so no shard swells past the camera
+      for (let k = 0; k < 3; k++) angVel[ix + k] += (rand() - 0.5) * CFG.spinBurst;
+      recover[i] = -CFG.holdSeconds / CFG.regatherSeconds;
+    }
+    settleTimer = 0;
   }
 
-  const dummy = new Object3D();
-  const col = new Color();
-  const near = [0, 0];
-
-  function step(dt, t) {
-    if (hovering) raycaster.setFromCamera(ndc, camera);
+  // ---- Simulation ----
+  function step(dt) {
     const K = CFG.stiffness;
     const critical = 2 * Math.sqrt(K);
+    const target = SHAPES[to].centroids;
+    let allRecovered = true;
 
-    for (let i = 0; i < count; i++) {
+    for (let i = 0; i < N; i++) {
       const ix = i * 3;
       recover[i] = Math.min(1, recover[i] + dt / CFG.regatherSeconds);
-      const r = smoothstep(recover[i]);
+      const r = smoothstep(clamp(recover[i], 0, 1));
+      if (recover[i] < 1) allRecovered = false;
       const k = K * r * r;
-      const damping = 0.55 + (critical - 0.55) * r;
+      const damping = 0.35 + (critical - 0.35) * r;
 
-      target(i, t, tmp);
-      let ax = k * (tmp[0] - pos[ix]) - damping * vel[ix];
-      let ay = k * (tmp[1] - pos[ix + 1]) - damping * vel[ix + 1];
-      let az = k * (tmp[2] - pos[ix + 2]) - damping * vel[ix + 2];
-
-      let g = 0;
-      if (hovering) {
-        rayPointAtZ(pos[ix + 2], near);
-        const dx = pos[ix] - near[0];
-        const dy = pos[ix + 1] - near[1];
-        const d = Math.hypot(dx, dy);
-        if (d < CFG.hoverRadius && d > 1e-3) {
-          g = 1 - d / CFG.hoverRadius;
-          const f = CFG.hoverForce * g * g;
-          ax += (dx / d) * f;
-          ay += (dy / d) * f;
-        }
-      }
-      glow[i] += (g - glow[i]) * Math.min(1, dt * 6);
-
-      vel[ix] += ax * dt;
-      vel[ix + 1] += ay * dt;
-      vel[ix + 2] += az * dt;
-      pos[ix] += vel[ix] * dt;
-      pos[ix + 1] += vel[ix + 1] * dt;
-      pos[ix + 2] += vel[ix + 2] * dt;
-
-      const spinDecay = Math.exp(-dt * 0.9);
       for (let c = 0; c < 3; c++) {
-        extraSpin[ix + c] *= spinDecay;
-        rot[ix + c] += (spin[ix + c] + extraSpin[ix + c]) * dt;
+        const a = k * (target[ix + c] - pos[ix + c]) - damping * vel[ix + c];
+        vel[ix + c] += a * dt;
+        pos[ix + c] += vel[ix + c] * dt;
       }
+
+      // Tumble, with the spin bleeding off and the shard easing back to its resting orientation.
+      q.fromArray(quat, i * 4);
+      const wx = angVel[ix], wy = angVel[ix + 1], wz = angVel[ix + 2];
+      const w = Math.hypot(wx, wy, wz);
+      if (w > 1e-4) {
+        dq.setFromAxisAngle(axis.set(wx / w, wy / w, wz / w), w * dt);
+        q.premultiply(dq);
+      }
+      const decay = Math.exp(-dt * (0.6 + 2.5 * r));
+      angVel[ix] *= decay;
+      angVel[ix + 1] *= decay;
+      angVel[ix + 2] *= decay;
+      q.slerp(ident, 1 - Math.exp(-dt * 3 * r * r));
+      q.toArray(quat, i * 4);
+    }
+
+    if (allRecovered) {
+      settleTimer += dt;
+      if (settleTimer > 1.2) resetToWhole(to);
     }
   }
 
-  function writeInstances() {
-    for (let i = 0; i < count; i++) {
-      const ix = i * 3;
-      // Scattered shapes shrink as they disperse and grow back as they regather.
-      const s = size[i] * (0.3 + 0.7 * smoothstep(recover[i])) * (1 + glow[i] * 0.25);
-      dummy.position.set(pos[ix], pos[ix + 1], pos[ix + 2]);
-      dummy.rotation.set(rot[ix], rot[ix + 1], rot[ix + 2]);
-      dummy.scale.setScalar(s);
-      dummy.updateMatrix();
-      const mesh = meshes[type[i]];
-      mesh.setMatrixAt(slot[i], dummy.matrix);
-      col.copy(palette[tint[i]]).lerp(palette[4], Math.min(1, glow[i] * 1.4));
-      mesh.setColorAt(slot[i], col);
+  function writeVertices() {
+    const A = SHAPES[from].locals;
+    const B = SHAPES[to].locals;
+    for (let i = 0; i < N; i++) {
+      const r = whole ? 1 : smoothstep(clamp(recover[i], 0, 1));
+      const m = whole ? 1 : r; // morph each shard from the old shape's triangle to the new one's
+      const shrink = whole ? 1 : 0.55 + 0.45 * r; // gaps open up while scattered
+      q.fromArray(quat, i * 4);
+      for (let v = 0; v < 3; v++) {
+        const j = i * 9 + v * 3;
+        v3.set(lerp(A[j], B[j], m), lerp(A[j + 1], B[j + 1], m), lerp(A[j + 2], B[j + 2], m))
+          .multiplyScalar(shrink)
+          .applyQuaternion(q);
+        positions[j] = pos[i * 3] + v3.x;
+        positions[j + 1] = pos[i * 3 + 1] + v3.y;
+        positions[j + 2] = pos[i * 3 + 2] + v3.z;
+      }
     }
-    for (const m of meshes) {
-      m.instanceMatrix.needsUpdate = true;
-      if (m.instanceColor) m.instanceColor.needsUpdate = true;
+    geometry.attributes.position.needsUpdate = true;
+  }
+
+  // Wall-clock time keeps the hover motion in phase across page loads.
+  const clock = () => (Date.now() / 1000) % 100000;
+
+  function place(t, dt) {
+    if (hovering) {
+      raycaster.setFromCamera(ndc, camera);
+      lean.lerp(ndc, Math.min(1, dt * 2));
+      const o = raycaster.ray.origin;
+      const d = raycaster.ray.direction;
+      const s = (group.position.z - o.z) / d.z;
+      const dist = Math.hypot(o.x + d.x * s - group.position.x, o.y + d.y * s - group.position.y);
+      glow += ((dist < radius * 1.15 ? 1 : 0) - glow) * Math.min(1, dt * 4);
+    } else {
+      lean.multiplyScalar(1 - Math.min(1, dt * 2));
+      glow *= 1 - Math.min(1, dt * 4);
     }
+    group.position.set(homeX + Math.cos(t * 0.31) * 0.12, Math.sin(t * 0.6) * 0.22, 0);
+    group.rotation.set(
+      Math.sin(t * 0.23) * 0.35 - lean.y * CFG.hoverLean,
+      t * 0.22 + lean.x * CFG.hoverLean,
+      Math.sin(t * 0.17) * 0.12,
+    );
+    group.scale.setScalar(radius * (1 + glow * 0.04));
+    material.emissive.copy(accent).multiplyScalar(glow * 0.25);
   }
 
   function render() {
-    writeInstances();
     renderer.render(scene, camera);
   }
 
-  window.addEventListener('resize', () => { resize(); if (reduceMotion) render(); }, { passive: true });
+  window.addEventListener('resize', () => { resize(); if (reduceMotion) { place(clock(), 0); render(); } }, { passive: true });
 
   if (reduceMotion) {
     // Respect the OS setting: a still image, no animation or interaction.
+    place(clock(), 0);
     render();
     return;
   }
@@ -327,7 +350,7 @@ function init(canvas) {
     if (e.target instanceof Element && e.target.closest(IGNORE)) return;
     const sel = window.getSelection();
     if (sel && !sel.isCollapsed) return; // the user was selecting text
-    scatter(e.clientX, e.clientY);
+    shatter(e.clientX, e.clientY);
   }, { passive: true });
 
   let raf = 0;
@@ -336,13 +359,101 @@ function init(canvas) {
     raf = requestAnimationFrame(frame);
     const dt = Math.min((now - last) / 1000 || 0, 1 / 30);
     last = now;
-    step(dt, clock());
+    place(clock(), dt);
+    if (!whole) {
+      step(dt);
+      if (!whole) writeVertices();
+    }
     render();
   }
   function start() { if (!raf) { last = performance.now(); raf = requestAnimationFrame(frame); } }
   function stop() { cancelAnimationFrame(raf); raf = 0; }
   document.addEventListener('visibilitychange', () => (document.hidden ? stop() : start()));
   start();
+}
+
+// Turn a geometry into exactly `count` triangles (splitting the largest ones along their
+// longest edge, which keeps the surface unchanged), normalised to radius 1 and ordered
+// top-to-bottom in a snake pattern so shards travel to nearby spots when shapes change.
+function buildShards(geometry, count) {
+  const g = geometry.index ? geometry.toNonIndexed() : geometry;
+  g.computeBoundingSphere();
+  const { center, radius } = g.boundingSphere;
+  const src = g.attributes.position.array;
+  let tris = [];
+  for (let i = 0; i < src.length; i += 9) {
+    const t = new Float32Array(9);
+    for (let k = 0; k < 9; k += 3) {
+      t[k] = (src[i + k] - center.x) / radius;
+      t[k + 1] = (src[i + k + 1] - center.y) / radius;
+      t[k + 2] = (src[i + k + 2] - center.z) / radius;
+    }
+    tris.push(t);
+  }
+  if (tris.length > count) {
+    // Not expected with the shapes above; keep the largest so the silhouette survives.
+    tris.sort((a, b) => area(b) - area(a));
+    tris = tris.slice(0, count);
+  }
+  while (tris.length < count) {
+    let best = 0;
+    let bestArea = -1;
+    for (let i = 0; i < tris.length; i++) {
+      const a = area(tris[i]);
+      if (a > bestArea) { bestArea = a; best = i; }
+    }
+    const [t1, t2] = split(tris[best]);
+    tris[best] = t1;
+    tris.push(t2);
+  }
+
+  const BANDS = 14;
+  const keyed = tris.map((t) => {
+    const cx = (t[0] + t[3] + t[6]) / 3;
+    const cy = (t[1] + t[4] + t[7]) / 3;
+    const cz = (t[2] + t[5] + t[8]) / 3;
+    const len = Math.hypot(cx, cy, cz) || 1;
+    const lat = Math.asin(clamp(cy / len, -1, 1)); // -pi/2 .. pi/2
+    const band = Math.min(BANDS - 1, Math.floor(((Math.PI / 2 - lat) / Math.PI) * BANDS));
+    let lon = (Math.atan2(cz, cx) + Math.PI) / (2 * Math.PI);
+    if (band % 2) lon = 1 - lon;
+    return { t, cx, cy, cz, key: band + lon };
+  });
+  keyed.sort((a, b) => a.key - b.key);
+
+  const centroids = new Float32Array(count * 3);
+  const locals = new Float32Array(count * 9);
+  keyed.forEach(({ t, cx, cy, cz }, i) => {
+    centroids.set([cx, cy, cz], i * 3);
+    for (let k = 0; k < 9; k += 3) {
+      locals[i * 9 + k] = t[k] - cx;
+      locals[i * 9 + k + 1] = t[k + 1] - cy;
+      locals[i * 9 + k + 2] = t[k + 2] - cz;
+    }
+  });
+  g.dispose();
+  geometry.dispose();
+  return { centroids, locals };
+}
+
+function area(t) {
+  const ux = t[3] - t[0], uy = t[4] - t[1], uz = t[5] - t[2];
+  const vx = t[6] - t[0], vy = t[7] - t[1], vz = t[8] - t[2];
+  return 0.5 * Math.hypot(uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx);
+}
+
+function split(t) {
+  // Bisect the longest edge; both halves keep the original winding.
+  const d = (a, b) => Math.hypot(t[a] - t[b], t[a + 1] - t[b + 1], t[a + 2] - t[b + 2]);
+  const e = [d(0, 3), d(3, 6), d(6, 0)];
+  const longest = e.indexOf(Math.max(...e));
+  // Rotate so the longest edge is A→B.
+  const order = [[0, 3, 6], [3, 6, 0], [6, 0, 3]][longest];
+  const A = [t[order[0]], t[order[0] + 1], t[order[0] + 2]];
+  const B = [t[order[1]], t[order[1] + 1], t[order[1] + 2]];
+  const C = [t[order[2]], t[order[2] + 1], t[order[2] + 2]];
+  const M = [(A[0] + B[0]) / 2, (A[1] + B[1]) / 2, (A[2] + B[2]) / 2];
+  return [Float32Array.from([...A, ...M, ...C]), Float32Array.from([...M, ...B, ...C])];
 }
 
 function mulberry32(seed) {
