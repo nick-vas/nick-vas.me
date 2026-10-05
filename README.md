@@ -30,9 +30,13 @@ Set `draft: false` (or delete the line) to publish a post.
 ## Deploying to the droplet
 
 ```sh
-hugo --minify
-rsync -avz --delete public/ user@droplet:/var/www/nick-vas.me/
+DEPLOY_TARGET=user@your-droplet ./deploy/deploy.sh
 ```
+
+[`deploy/deploy.sh`](deploy/deploy.sh) builds the site, makes pre-compressed `.gz` copies of
+text files, and uploads to `/var/www/nick-vas.me` (override with `DEPLOY_PATH`) with
+permissions Nginx can read. Use it rather than a plain `rsync`: the Nginx config serves those
+`.gz` copies directly instead of compressing on every request.
 
 The Nginx server block is in [`deploy/nginx/nick-vas.me.conf`](deploy/nginx/nick-vas.me.conf).
 It gzips text files and sets caching: files Hugo fingerprints (the script and stylesheet,
@@ -46,6 +50,10 @@ sudo nginx -t && sudo systemctl reload nginx
 ```
 
 Add HTTPS with `sudo certbot --nginx -d nick-vas.me -d www.nick-vas.me`.
+
+Ubuntu's `/etc/nginx/nginx.conf` allows 768 connections per worker, and a 1-vCPU droplet
+has one worker; past that, visitors silently queue and time out. Raise it to
+`worker_connections 4096;` in the `events` block, then `sudo systemctl reload nginx`.
 
 ## Background scene
 
