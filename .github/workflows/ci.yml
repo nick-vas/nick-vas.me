@@ -63,6 +63,16 @@ jobs:
             'public/**/*.html'
           fail: true
 
+  deploy-scripts:
+    name: Deploy scripts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # The scripts that run on the droplet are tested here on real Linux, not just trusted.
+      - run: shellcheck deploy/*.sh tests/deploy/*.sh
+      - run: bash tests/deploy/remote-switch.test.sh
+      - run: bash tests/deploy/deploy.test.sh
+
   browsers:
     name: Browsers (${{ matrix.project }})
     needs: build

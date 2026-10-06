@@ -29,14 +29,21 @@ Set `draft: false` (or delete the line) to publish a post.
 
 ## Deploying to the droplet
 
+Pushes to `main` that pass CI deploy automatically through GitHub Actions
+(`.github/workflows/deploy.yml`), using secrets from a `production` environment; setup,
+rollback and troubleshooting are in [`deploy/CD.md`](deploy/CD.md). By hand:
+
 ```sh
-DEPLOY_TARGET=user@your-droplet ./deploy/deploy.sh
+DEPLOY_TARGET=user@your-droplet ./deploy/deploy.sh      # build, upload as a new release, go live
+DEPLOY_TARGET=user@your-droplet ./deploy/rollback.sh    # back to the previous release
 ```
 
 [`deploy/deploy.sh`](deploy/deploy.sh) builds the site, makes pre-compressed `.gz` copies of
-text files, and uploads to `/var/www/nick-vas.me` (override with `DEPLOY_PATH`) with
-permissions Nginx can read. Use it rather than a plain `rsync`: the Nginx config serves those
-`.gz` copies directly instead of compressing on every request.
+text files, and uploads them as a new release under `/var/www/nick-vas.me/releases/` (override
+the base with `DEPLOY_PATH`) with permissions Nginx can read. It then repoints the `current`
+symlink, which Nginx serves, in one atomic step, so visitors never see a half-uploaded site, and
+keeps the last 5 releases for rollback. Use it rather than a plain `rsync`: the Nginx config
+serves the `.gz` copies directly instead of compressing on every request.
 
 The Nginx server block is in [`deploy/nginx/nick-vas.me.conf`](deploy/nginx/nick-vas.me.conf).
 It gzips text files and sets caching: files Hugo fingerprints (the script and stylesheet,

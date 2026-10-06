@@ -1,0 +1,152 @@
+name: Deploy
+
+# Publishes to the droplet after CI passes on main. Everything environment-specific (host, user,
+# key, path, URL) comes from secrets in the "production" environment (Settings > Environments),
+# so nothing about the server is in the repo. See deploy/CD.md for the one-time setup.
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      action:
+        description: Deploy the selected commit, or roll the live site back one release
+        type: choice
+        options: [deploy, rollback]
+        default: deploy
+
+permissions:
+  contents: read
+
+# One deploy at a time, and never cancel one halfway through an upload.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+env:
+  HUGO_VERSION: "0.167.0"
+
+jobs:
+  deploy:
+    name: ${{ inputs.action == 'rollback' && 'Roll back' || 'Deploy' }}
+    # Only for a CI run that passed on a push to main (not a PR), or a manual run started from
+    # main: a manual run skips the CI gate, so it must not be able to publish another branch.
+    if: >-
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      DEPLOY_TARGET: ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}
+      DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+      SITE_URL: ${{ secrets.SITE_URL }}
+    steps:
+      - name: Check the deployment secrets are set
+        env:
+          HAVE_HOST: ${{ secrets.DEPLOY_HOST != '' }}
+          HAVE_USER: ${{ secrets.DEPLOY_USER != '' }}
+          HAVE_KEY: ${{ secrets.DEPLOY_SSH_KEY != '' }}
+          HAVE_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS != '' }}
+          HAVE_URL: ${{ secrets.SITE_URL != '' }}
+        run: |
+          missing=0
+          for pair in HOST:DEPLOY_HOST USER:DEPLOY_USER KEY:DEPLOY_SSH_KEY KNOWN_HOSTS:DEPLOY_KNOWN_HOSTS URL:SITE_URL; do
+            flag="HAVE_${pair%%:*}"
+            if [ "${!flag}" != "true" ]; then echo "::error::secret ${pair##*:} is not set in the production environment"; missing=1; fi
+          done
+          exit "$missing"
+
+      # Build exactly the commit CI tested (not whatever main has moved on to since).
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          submodules: recursive
+
+      - uses: peaceiris/actions-hugo@v3
+        if: inputs.action != 'rollback'
+        with:
+          hugo-version: ${{ env.HUGO_VERSION }}
+          extended: true
+
+      - name: Set up SSH
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          # The host key is pinned from a secret, never fetched with ssh-keyscan at deploy time,
+          # so a man-in-the-middle cannot be trusted on first use.
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          cat > ~/.ssh/config <<EOF
+          Host *
+            IdentityFile ~/.ssh/deploy_key
+            IdentitiesOnly yes
+            StrictHostKeyChecking yes
+            BatchMode yes
+            ServerAliveInterval 15
+          EOF
+          chmod 600 ~/.ssh/config
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+
+      - name: Build and upload a new release
+        id: release
+        if: inputs.action != 'rollback'
+        run: bash deploy/deploy.sh
+
+      - name: Roll back to the previous release
+        id: manual_rollback
+        if: inputs.action == 'rollback'
+        run: bash deploy/rollback.sh
+
+      - name: Verify the live site
+        id: verify
+        run: |
+          set -euo pipefail
+          url="${SITE_URL%/}"
+          headers=$(curl -fsSI --retry 5 --retry-delay 3 --retry-all-errors "$url/")
+          echo "$headers" | head -1
+          echo "$headers" | grep -qi '^content-security-policy:' || { echo "::error::no Content-Security-Policy header; is the security snippet included?"; exit 1; }
+          page=$(curl -fsS --retry 3 "$url/")
+          # Every stylesheet and script the page references must load: a broken deploy usually
+          # shows up as a 404 on the fingerprinted assets. Hugo's minifier drops the quotes
+          # around attribute values, so they are optional in the pattern.
+          assets=$(grep -oE '(href|src)="?[^" >]+\.(css|js)[^" >]*' <<<"$page" | sed -E 's/^(href|src)="?//' | grep -E '\.(css|js)(\?.*)?$' || true)
+          [ -n "$assets" ] || { echo "::error::found no stylesheet or script in the page; check the pattern or the deploy"; exit 1; }
+          while read -r asset; do
+            case "$asset" in
+              http*) full="$asset" ;;
+              //*) full="https:$asset" ;;
+              *) full="$url/${asset#/}" ;;
+            esac
+            code=$(curl -s -o /dev/null -w '%{http_code}' "$full")
+            echo "$code $asset"
+            [ "$code" = 200 ] || { echo "::error::$asset returned $code"; exit 1; }
+          done <<<"$assets"
+          # And a few other pages, so a half-broken release is not judged by the home page alone.
+          for page_path in /about/ /posts/ /index.xml; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' "$url$page_path")
+            echo "$code $page_path"
+            [ "$code" = 200 ] || { echo "::error::$page_path returned $code"; exit 1; }
+          done
+
+      # A deploy that goes live but fails verification is undone straight away.
+      - name: Roll back the failed deploy
+        if: failure() && steps.verify.conclusion == 'failure' && inputs.action != 'rollback'
+        run: bash deploy/rollback.sh
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### ${{ inputs.action == 'rollback' && 'Rollback' || 'Deploy' }}: ${{ job.status }}"
+            echo "- Commit: \`${{ github.event.workflow_run.head_sha || github.sha }}\`"
+            live="${{ steps.release.outputs.release || steps.manual_rollback.outputs.release }}"
+            [ -z "$live" ] || echo "- Release now live: \`$live\`"
+            echo "- Site: ${SITE_URL}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove the SSH key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key ~/.ssh/config ~/.ssh/known_hosts

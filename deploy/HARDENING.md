@@ -126,7 +126,9 @@ sudo find /var/www/nick-vas.me -type f -exec chmod 644 {} \;
 ```
 
 `deploy/deploy.sh` already rsyncs with `--chmod=D755,F644`, so this stays correct on every
-deploy.
+deploy. If you use the GitHub Actions pipeline, the site is served from
+`/var/www/nick-vas.me/current` (a symlink into `releases/`) and the files are owned by a
+separate `cideploy` user instead; follow [`CD.md`](CD.md) for the ownership commands.
 
 ---
 
