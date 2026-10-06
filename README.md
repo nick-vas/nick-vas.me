@@ -18,7 +18,7 @@ git submodule update --init --recursive
 | Edit with live reload and drafts | `hugo server -D`, then http://localhost:1313 |
 | See exactly what visitors get: the production build behind the real Nginx config (security headers, gzip, caching, rate limits) | `bash deploy/local.sh`, then http://localhost:8080 (includes the draft test posts; add `--no-drafts` to see only what is published; stop with `bash deploy/local.sh down`). Needs Docker. |
 | Run the browser tests against that Nginx | `cd tests && BASE_URL=http://localhost:8080 npx playwright test` |
-| Run the browser tests against a plain static copy of the build | `hugo --minify --baseURL http://localhost:4173/ && cd tests && npx playwright test` |
+| Run the browser tests against a plain static copy of the build | `hugo --minify --buildDrafts --baseURL http://localhost:4173/ && cd tests && npx playwright test` |
 | Run the deploy-script tests | `bash tests/deploy/remote-switch.test.sh` and `bash tests/deploy/deploy.test.sh` (Linux or WSL) |
 | Health-check any running copy of the site | `bash deploy/verify.sh http://localhost:8080` |
 
@@ -171,7 +171,7 @@ same opacity on every page, and carries over as you move between pages.
 Run the browser tests locally (see also [Running it locally](#running-it-locally)):
 
 ```sh
-hugo --minify --baseURL http://localhost:4173/    # build into public/
+hugo --minify --buildDrafts --baseURL http://localhost:4173/    # build into public/ (with the draft test posts the tests use)
 cd tests && npm ci && npx playwright install      # first time only
 npx playwright test                               # add --project=webkit to run one browser
 ```
@@ -188,13 +188,13 @@ cover what the theme doesn't, mainly around the animated background.
 | WCAG | What | Where |
 | --- | --- | --- |
 | 2.2.2 Pause, Stop, Hide | Pause button for the background animation, remembered across pages; the paused pose is identical on every page. The animation plays by default, including when the OS "reduce motion" setting is on. Nothing animates in Windows High Contrast. | `layouts/_partials/scene_controls.html`, `assets/js/bg-scene.js` |
-| 2.1.1 Keyboard | The shatter is also a button, so it isn't mouse-only. | same |
+| 2.1.1 Keyboard | The shatter is also a button, so it isn't mouse-only. Code blocks and tables that scroll sideways take keyboard focus (and task-list checkboxes get names) via `assets/js/a11y-content.js`. | same |
 | 2.3.1 Three Flashes | Shard spin is capped at one turn per second, so a shard swaps its rainbow face for the complementary one at most twice a second, however fast someone clicks. | `bg-scene.js` (`MAX_SPIN`) |
-| 1.4.3 Contrast | Shards passing behind text never reduce its contrast. Short text (header, home intro, titles, footer) gets a halo in the page's own background colour; long-form text (post bodies, archive lists) sits on blocks of the page colour instead, which costs nothing to paint (a halo on every glyph of a long post measured ~20x the scroll raster work). Theme containers that clip overflow are widened so the halo isn't cut off. Dark-mode post tags raised from 4.24:1 to 6.8:1. | `assets/css/extended/a11y.css` |
+| 1.4.3 Contrast | Shards passing behind text never reduce its contrast. Short text (header, home intro, titles, footer) gets a halo in the page's own background colour; long-form text (post bodies) sits on blocks of the page colour instead, which costs nothing to paint (a halo on every glyph of a long post measured ~20x the scroll raster work). Theme containers that clip overflow are widened so the halo isn't cut off. Dark-mode post tags raised from 4.24:1 to 6.8:1, dark-mode previous/next post links from 4.24:1 to 7+:1, and code-comment colour from 2.9:1 to 5+:1. The posts page and archive entries are transparent with a 1px outline, so their text keeps the halo. | `assets/css/extended/site.css` |
 | 2.4.1 Bypass Blocks | "Skip to content" link, first in the tab order; moves focus into `<main>`. | `layouts/baseof.html` |
 | 2.4.4 / 4.1.2 | Social icon links named "GitHub (opens in new tab)", "RSS feed (opens in new tab)". | `layouts/_partials/social_icons.html` |
-| 2.4.7 / 2.4.11 / 2.5.8 | 44×44 px controls with a 3 px focus ring; `scroll-padding-bottom: 120px` keeps keyboard focus clear of the fixed buttons, including PaperMod's go-to-top button. | `a11y.css` |
-| Forced colours | In Windows High Contrast the decorative scene is removed. | `a11y.css` |
+| 2.4.7 / 2.4.11 / 2.5.8 | 44×44 px controls with a 3 px focus ring; `scroll-padding-bottom: 120px` keeps keyboard focus clear of the fixed buttons, including PaperMod's go-to-top button. | `site.css` |
+| Forced colours | In Windows High Contrast the decorative scene is removed. | `site.css` |
 
 `layouts/baseof.html` and `layouts/_partials/social_icons.html` override PaperMod's files;
 when updating the theme, compare them with `themes/PaperMod/layouts/` (changes are marked).

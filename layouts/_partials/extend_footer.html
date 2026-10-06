@@ -2,4 +2,6 @@
 {{- $js := resources.Get "js/bg-scene.js" | js.Build (dict "format" "iife" "minify" true "target" "es2018") | fingerprint }}
 <canvas id="bg-scene" aria-hidden="true"></canvas>
 <script defer src="{{ $js.RelPermalink }}" integrity="{{ $js.Data.Integrity }}"></script>
+{{- $a11y := resources.Get "js/a11y-content.js" | js.Build (dict "format" "iife" "minify" true "target" "es2018") | fingerprint }}
+<script defer src="{{ $a11y.RelPermalink }}" integrity="{{ $a11y.Data.Integrity }}"></script>
 {{ partial "a11y_test.html" . }}

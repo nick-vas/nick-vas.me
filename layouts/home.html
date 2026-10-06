@@ -1,0 +1,14 @@
+{{- /*
+  Home page: the intro only, with no list of posts (they are under Posts and Archive).
+  Replaces PaperMod's list.html for the home page; every other list page still uses the theme's.
+*/ -}}
+{{- define "main" }}
+{{- if .Content }}
+<div class="post-content md-content">
+  {{- if not (.Param "disableAnchoredHeadings") }}
+  {{- partial "anchored_headings.html" .Content -}}
+  {{- else }}{{ .Content }}{{ end }}
+</div>
+{{- end }}
+{{- partial "home_info.html" . }}
+{{- end }}{{/* end main */}}

@@ -35,8 +35,10 @@ jobs:
       - name: Check the theme submodule is present
         run: test -d themes/PaperMod/layouts || { echo "::error::themes/PaperMod is empty; the submodule was not checked out"; exit 1; }
 
-      # Same flags as deploy/deploy.sh, so a minifier surprise shows up here and not in production.
-      - run: hugo --minify --baseURL "$CI_BASE_URL"
+      # Same flags as deploy/deploy.sh, so a minifier surprise shows up here and not in production,
+      # plus --buildDrafts so the tests also cover the draft test posts. This build is only for
+      # testing; the deploy workflow rebuilds from source without drafts.
+      - run: hugo --minify --buildDrafts --baseURL "$CI_BASE_URL"
 
       - uses: actions/upload-artifact@v4
         with:

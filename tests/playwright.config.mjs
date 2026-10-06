@@ -12,6 +12,9 @@ export default defineConfig({
   testDir: './e2e',
   timeout: 60_000,
   retries: process.env.CI ? 1 : 0,
+  // Software-rendered WebGL (SwiftShader) is CPU-heavy: running every browser at once on a laptop
+  // starves the first page load of each browser and times it out. A few workers is plenty.
+  workers: process.env.CI ? 2 : 3,
   reporter: process.env.CI ? [['list'], ['html', { open: 'never' }]] : 'list',
   use: {
     baseURL: external || 'http://localhost:4173',

@@ -1,7 +1,13 @@
 import { test, expect } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 
-const PAGES = ['/', '/posts/', '/posts/hello-world/', '/archives/', '/search/', '/about/'];
+// The draft test posts (content/posts/test-*.md) are included: the CI build uses --buildDrafts, so
+// the tests also cover long titles, wide code and tables, and previous/next post links, which
+// only appear once there is more than one post.
+const PAGES = [
+  '/', '/posts/', '/posts/hello-world/', '/archives/', '/search/', '/about/',
+  '/posts/test-long-form/', '/posts/test-code-heavy/', '/posts/test-very-long-title/', '/posts/test-lists-and-media/',
+];
 
 // Ready = loaded and the scene (if WebGL works here) has started. Not 'networkidle', which
 // Playwright discourages and which timed out in Firefox when several browsers ran at once.
@@ -44,7 +50,9 @@ for (const path of PAGES) {
       test.skip(info.project.name !== 'chromium', 'axe runs once, in desktop Chromium');
       for (const theme of ['dark', 'light']) {
         // A fresh context per theme, so one theme's saved preference can't leak into the other.
-        const context = await browser.newContext();
+        // Reduced motion switches off the scroll-driven fade-ins, which would otherwise change an
+        // element's opacity (and so its measured contrast) part-way through the scan.
+        const context = await browser.newContext({ reducedMotion: 'reduce' });
         const page = await context.newPage();
         await open(page, path, theme);
         const { violations } = await new AxeBuilder({ page })

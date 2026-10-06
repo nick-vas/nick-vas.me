@@ -474,7 +474,7 @@ function init(canvas) {
     }
     render();
   }
-  // In forced-colours mode (Windows High Contrast) a11y.css hides the scene; don't keep
+  // In forced-colours mode (Windows High Contrast) site.css hides the scene; don't keep
   // rendering it out of sight.
   const forcedColors = window.matchMedia('(forced-colors: active)');
   function start() {
@@ -551,6 +551,6 @@ function init(canvas) {
   // Fade in on the first page of a visit only; later pages show it at full opacity at once,
   // so moving between pages never dips the shape's opacity.
   if (!firstSceneOfVisit()) canvas.style.transition = 'none';
-  canvas.classList.add('is-ready'); // fades the canvas in (see bg-scene.css)
+  canvas.classList.add('is-ready'); // fades the canvas in (see site.css)
   if (controls) controls.hidden = false;
 }
