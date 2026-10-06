@@ -1,0 +1,122 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  HUGO_VERSION: "0.167.0"
+  # The production build is served locally for the browser tests, so absolute URLs resolve.
+  CI_BASE_URL: http://localhost:4173/
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive # themes/PaperMod
+
+      - uses: peaceiris/actions-hugo@v3
+        with:
+          hugo-version: ${{ env.HUGO_VERSION }}
+          extended: true
+
+      # Same flags as deploy/deploy.sh, so a minifier surprise shows up here and not in production.
+      - run: hugo --minify --baseURL "$CI_BASE_URL"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: public
+          path: public
+          retention-days: 7
+
+  links:
+    name: Links and assets
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: public
+          path: public
+
+      # Offline: checks that every internal link, image, script and stylesheet resolves to a file
+      # in the build. External sites are not fetched, so this never flakes on someone else's
+      # outage. The build's absolute URLs (http://localhost:4173/...) are remapped to the files
+      # on disk, so they are really checked instead of skipped as "remote".
+      - uses: lycheeverse/lychee-action@v2
+        with:
+          args: >-
+            --offline --no-progress --include-fragments
+            --root-dir "${{ github.workspace }}/public"
+            --remap 'http://localhost:4173/(.*) file://${{ github.workspace }}/public/$1'
+            'public/**/*.html'
+          fail: true
+
+  browsers:
+    name: Browsers (${{ matrix.project }})
+    needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        project: [chromium, firefox, webkit, mobile-chrome, mobile-safari]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: public
+          path: public
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: tests/package-lock.json
+
+      - name: Install test dependencies and browsers
+        working-directory: tests
+        run: |
+          npm ci
+          npx playwright install --with-deps ${{ contains(matrix.project, 'chrome') && 'chromium' || contains(matrix.project, 'safari') && 'webkit' || matrix.project }}
+
+      - name: Run tests
+        working-directory: tests
+        run: npx playwright test --project=${{ matrix.project }}
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report-${{ matrix.project }}
+          path: |
+            tests/playwright-report
+            tests/test-results
+          retention-days: 7
+
+  lighthouse:
+    name: Lighthouse
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: public
+          path: public
+
+      - uses: treosh/lighthouse-ci-action@v12
+        with:
+          configPath: ./tests/lighthouserc.json
+          uploadArtifacts: true

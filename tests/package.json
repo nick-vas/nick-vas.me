@@ -1,0 +1,14 @@
+{
+  "name": "nick-vas-me-tests",
+  "private": true,
+  "description": "Browser and accessibility tests for the built site (served from ../public).",
+  "scripts": {
+    "test": "playwright test",
+    "serve": "http-server ../public -p 4173 -c-1 --silent"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "^4.10.0",
+    "@playwright/test": "^1.50.0",
+    "http-server": "^14.1.1"
+  }
+}

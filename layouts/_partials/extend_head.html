@@ -1,6 +1,9 @@
 {{- /* Crossfade between pages (Chrome, Edge, Safari; other browsers navigate as normal).
      Inline because Hugo's CSS minifier drops @view-transition. */ -}}
 <style>@view-transition{navigation:auto}@media (prefers-reduced-motion:reduce){@view-transition{navigation:none}}</style>
+{{- /* Sharp, tiny SVG icon for browsers that support it; the PNG/ICO ones from PaperMod's head
+     partial (static/favicon*.png, favicon.ico, apple-touch-icon.png) cover the rest. */ -}}
+<link rel="icon" type="image/svg+xml" href="{{ "favicon.svg" | absURL }}">
 {{- if hugo.IsServer }}
 {{- /* Dev only: apply the accessibility test panel's saved choices before first paint. */ -}}
 <script>try{var t=JSON.parse(localStorage.getItem('a11y-test'))||{};for(var c in t)if(t[c])document.documentElement.classList.add(c)}catch(e){}</script>

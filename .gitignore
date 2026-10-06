@@ -1,6 +1,28 @@
+# Hugo build output and caches
 /public/
 /resources/_gen/
 /.hugo_build.lock
 
-# Visual Studio
+# Node (the test tooling in tests/)
+node_modules/
+
+# Test output
+/tests/test-results/
+/tests/playwright-report/
+/tests/blob-report/
+/tests/playwright/.cache/
+.lighthouseci/
+
+# Editors and OS
 /.vs/
+/.vscode/
+/.idea/
+*.swp
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Logs and local env
+*.log
+.env
+.env.*

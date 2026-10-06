@@ -178,24 +178,20 @@ input, textarea, select, button, .scene-controls, .skip-link, mark {
 }
 
 /* Effect sliders: a gear button that opens a panel above the controls. */
-/* No position here on purpose: the panel is placed against the fixed controls bar, so it
-   starts at the viewport's left margin instead of running off the right edge on phones. */
-.scene-fx > summary {
-    list-style: none;
-}
-
-.scene-fx > summary::-webkit-details-marker {
-    display: none;
-}
-
-.scene-fx[open] > summary {
+#scene-fx-toggle[aria-expanded="true"] {
     background: var(--border);
 }
 
+.scene-fx-panel[hidden] {
+    display: none;
+}
+
+/* Fixed against the viewport so it starts at the left margin and never runs off the right
+   edge on phones. */
 .scene-fx-panel {
-    position: absolute;
-    left: 0;
-    bottom: 52px;
+    position: fixed;
+    left: 16px;
+    bottom: 76px; /* controls: 16px margin + 44px buttons + 16px gap */
     width: min(300px, calc(100vw - 32px));
     max-height: min(70vh, 520px);
     overflow-y: auto;

@@ -106,8 +106,8 @@ which drift apart and slowly regather as the next primitive (icosahedron, cube, 
 knot, octahedron, torus, dodecahedron, tetrahedron, cone, then round again). The shape
 is coloured with a rainbow gradient that slowly turns through the spectrum; each shard's
 inner face shows the complementary hue, so tumbling shards flash between a colour and
-its complement. The cursor makes the shape lean and glow in the complementary colour. It is full strength on the home page and dimmed
-elsewhere, and the current shape carries over as you move between pages.
+its complement. The shape leans toward the cursor (it never glows or swells on hover), is the
+same opacity on every page, and carries over as you move between pages.
 
 - The canvas has `pointer-events: none`, so it never blocks links, buttons or text
   selection. Clicks on links, buttons, code, post cards, the header and the footer are
@@ -118,16 +118,45 @@ elsewhere, and the current shape carries over as you move between pages.
   when you leave a page and restored (fast-forwarded by the time the navigation took)
   on the next one. Pages crossfade in browsers that support view transitions (the rule
   is inline in `layouts/_partials/extend_head.html`, because Hugo's CSS minifier drops
-  it), and the canvas fades in on its first frame.
+  it), and the canvas fades in on the first page of a visit only.
 - Only the current shape is prepared before the first frame (about 2 ms); the next one
   is prepared when the browser is idle.
 - Three.js r186 is vendored in `assets/js/vendor/` (MIT, see `three.LICENSE`) and
   bundled by Hugo, so the site makes no third-party requests.
-- Tune it via the `CFG` block at the top of `bg-scene.js` (burst strength, hold and
-  regather time, shard count, `hueSpan` and `hueDrift` for the rainbow), the `SHAPES`
-  list and the `TONES` saturation/lightness per theme. To reform
-  the same shape instead of the next one, change `to = (to + 1) % SHAPES.length` to
-  `to = from` in `shatter()`. Page dimming is in `assets/css/extended/bg-scene.css`.
+- Shards may travel a little past the screen edge and are eased back (`edgeMargin`,
+  `wallStiffness`).
+- The gear button opens sliders for the main effect settings (shatter speed, regather time,
+  hover tilt and follow speed, size, opacity, brightness, colours, ...). They apply live, are
+  remembered in `localStorage`, and have a reset button. The list is `FX` in
+  `assets/js/bg-scene/fx-panel.js`; defaults are in `assets/js/bg-scene/config.js`.
+- The code is split into modules under `assets/js/bg-scene/`: `config` (settings),
+  `shards` (the shapes and their cutting), `storage` (everything remembered between
+  pages), `fx-panel` (the sliders) and `math`. `assets/js/bg-scene.js` holds the scene and
+  simulation. To reform the same shape instead of the next one, change
+  `to = (to + 1) % SHAPE_COUNT` to `to = from` in `shatter()`.
+
+## Testing and CI
+
+`.github/workflows/ci.yml` runs on every pull request and push to `main`:
+
+| Job | What it checks |
+|---|---|
+| Build | `hugo --minify` with the same flags as `deploy/deploy.sh`, so minifier surprises show up before production. |
+| Links and assets | `lychee` (offline) confirms every internal link, image, script, stylesheet and icon resolves to a file in the build. |
+| Browsers | Playwright on Chromium, Firefox, WebKit, Pixel 7 and iPhone 14 profiles: no JS errors, no sideways scroll, the scene starts (or falls back cleanly without WebGL), the gear panel fits and closes with Escape, 44px targets, and a click/slider stress burst. Chromium also runs axe (WCAG 2.2 AA) in dark and light. |
+| Lighthouse | Accessibility must stay at 95+; performance, best-practices, SEO and bundle size are warnings. |
+
+Run the browser tests locally:
+
+```sh
+hugo --minify --baseURL http://localhost:4173/    # build into public/
+cd tests && npm ci && npx playwright install      # first time only
+npx playwright test                               # add --project=webkit to run one browser
+```
+
+Draft posts (`content/posts/test-*.md`) exist for manual testing and are only built with
+`hugo server -D`. In `hugo server`, an "A11y test" button (bottom-right) simulates reduced
+motion, 200% zoom, greyscale and outlines; it is never in a production build.
 
 ## Accessibility
 

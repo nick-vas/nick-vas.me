@@ -1,0 +1,13 @@
+# Store and check out text with LF, whatever the OS. The site is built and served on Linux,
+# and deploy/deploy.sh must not end up with CRLF line endings.
+* text=auto eol=lf
+
+# Binary files: never touch line endings.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.woff binary
+*.woff2 binary

@@ -17,16 +17,16 @@
         <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false" fill="none"
             stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2v5M12 17v5M2 12h5M17 12h5M4.9 4.9l3.5 3.5M15.6 15.6l3.5 3.5M4.9 19.1l3.5-3.5M15.6 8.4l3.5-3.5"/></svg>
     </button>
-    {{- /* Effect sliders; the rows are built by bg-scene.js. A native <details>, so it is keyboard
-         operable and announced as expandable with no extra ARIA. */}}
-    <details class="scene-fx" id="scene-fx">
-        <summary class="scene-btn" aria-label="Animation effects" title="Animation effects">
-            <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false" fill="none"
-                stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h10M18 7h2M4 17h2M10 17h10M14 4v6M8 14v6"/></svg>
-        </summary>
-        <div class="scene-fx-panel">
-            <div id="scene-fx-list"></div>
-            <button type="button" class="scene-fx-reset" id="scene-fx-reset">Reset to defaults</button>
-        </div>
-    </details>
+    {{- /* Effect sliders; the rows are built by bg-scene.js. A disclosure button (aria-expanded)
+         rather than <details>, because Safari/WebKit positions content inside <details>
+         against the details box, which broke the panel on phones. */}}
+    <button type="button" class="scene-btn" id="scene-fx-toggle" aria-expanded="false" aria-controls="scene-fx-panel"
+        aria-label="Animation effects" title="Animation effects">
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false" fill="none"
+            stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h10M18 7h2M4 17h2M10 17h10M14 4v6M8 14v6"/></svg>
+    </button>
+    <div class="scene-fx-panel" id="scene-fx-panel" role="group" aria-label="Animation effects" hidden>
+        <div id="scene-fx-list"></div>
+        <button type="button" class="scene-fx-reset" id="scene-fx-reset">Reset to defaults</button>
+    </div>
 </aside>

@@ -2,76 +2,48 @@
 // triangle shards, which drift apart and slowly regather as the next primitive.
 // Runs behind every page. The canvas never takes pointer events; clicks are read
 // from the window and ignored when they land on anything interactive.
+// Modules live in ./bg-scene/: config, shards (geometry), storage, fx-panel (sliders), math.
 import {
   BackSide,
-  BoxGeometry,
   BufferAttribute,
   BufferGeometry,
   Color,
-  ConeGeometry,
   DirectionalLight,
-  DodecahedronGeometry,
   FrontSide,
   Group,
   HemisphereLight,
-  IcosahedronGeometry,
   Mesh,
   MeshStandardMaterial,
-  OctahedronGeometry,
   PerspectiveCamera,
   Quaternion,
   Raycaster,
   Scene,
-  TetrahedronGeometry,
-  TorusGeometry,
-  TorusKnotGeometry,
   Vector2,
   Vector3,
   WebGLRenderer,
 } from './vendor/three.module.js';
+import { HEMI_BASE, SUN_BASE, createConfig } from './bg-scene/config.js';
+import { initFxPanel, restoreFx } from './bg-scene/fx-panel.js';
+import { clamp, lerp, mulberry32, smoothstep } from './bg-scene/math.js';
+import { SHAPE_COUNT, makeShape } from './bg-scene/shards.js';
+import {
+  clearSnapshot, firstSceneOfVisit, fromBase64, loadMotionPref, loadShape, loadTime,
+  saveMotionPref, saveShape, saveTime, storeSnapshot, takeSnapshot, toBase64,
+} from './bg-scene/storage.js';
 
 const canvas = document.getElementById('bg-scene');
 if (canvas) init(canvas);
 
 function init(canvas) {
-  const quiet = canvas.classList.contains('is-quiet');
+  const CFG = createConfig();
+  const FX_DEFAULTS = { ...CFG };
+  restoreFx(CFG);
+
   // The animation plays by default, even when the OS asks for reduced motion (a deliberate
   // choice for this site). WCAG 2.2.2 (Pause, Stop, Hide) is met by the pause button in
-  // baseof.html; the choice is remembered across pages. Only the dev-only test panel's
+  // scene_controls.html; the choice is remembered across pages. Only the dev-only test panel's
   // sim-rm class starts it paused with no saved choice.
-  const startPaused = document.documentElement.classList.contains('sim-rm');
-  const MOTION_KEY = 'bg-motion';
-  let paused = loadMotionPref() ?? startPaused;
-  function loadMotionPref() {
-    try {
-      const v = localStorage.getItem(MOTION_KEY);
-      return v === 'paused' ? true : v === 'playing' ? false : null;
-    } catch (err) {
-      return null;
-    }
-  }
-
-  const CFG = {
-    fov: 40,
-    camZ: 14,
-    shards: 768, // every primitive is cut into exactly this many triangles
-    burst: quiet ? 2.6 : 3.4, // initial shard speed, in shape radii per second
-    holdSeconds: 0.9, // drift freely before the pull back starts
-    regatherSeconds: 6, // time for the pull to ramp to full strength
-    stiffness: 2.5,
-    spinBurst: 9,
-    hoverLean: 0.35,
-    followSpeed: 8, // how fast the tilt chases the pointer (was 2)
-    hueSpan: 0.85, // how much of the spectrum the gradient covers, top to bottom
-    hueDrift: 0.015, // spectrum turns per second
-    idle: 1, // speed of the slow idle rotation, 1 = normal
-    size: 1, // shape size, 1 = normal
-    opacity: 0.95,
-    light: 1, // brightness of the lights, 1 = normal
-    edgeMargin: 0.05, // how far shards may travel past the screen edge (0 = stay on screen)
-    wallStiffness: 40, // how firmly shards are pushed back from that limit
-  };
-  const FX_DEFAULTS = { ...CFG };
+  let paused = loadMotionPref() ?? document.documentElement.classList.contains('sim-rm');
 
   let renderer;
   try {
@@ -86,8 +58,6 @@ function init(canvas) {
   const scene = new Scene();
   const camera = new PerspectiveCamera(CFG.fov, 1, 0.1, 100);
   camera.position.set(0, 0, CFG.camZ);
-  const HEMI_BASE = 1.4;
-  const SUN_BASE = 1.8;
   const hemi = new HemisphereLight(0xffffff, 0x445066, HEMI_BASE);
   const sun = new DirectionalLight(0xffffff, SUN_BASE);
   sun.position.set(5, 8, 10);
@@ -95,22 +65,10 @@ function init(canvas) {
 
   const rand = mulberry32(20261005);
 
-  // ---- Shapes: each normalised to radius 1 and cut into exactly CFG.shards triangles ----
-  const SHAPE_MAKERS = [
-    () => new IcosahedronGeometry(1, 1),
-    () => new BoxGeometry(1.25, 1.25, 1.25, 2, 2, 2),
-    () => new TorusKnotGeometry(0.72, 0.24, 48, 8),
-    () => new OctahedronGeometry(1, 1),
-    () => new TorusGeometry(0.78, 0.3, 8, 24),
-    () => new DodecahedronGeometry(1, 0),
-    () => new TetrahedronGeometry(1.1, 0),
-    () => new ConeGeometry(0.85, 1.5, 24, 1),
-  ];
-  const SHAPE_COUNT = SHAPE_MAKERS.length;
   // Built on demand: only the current shape is cut up before the first frame, and the
   // next one is prepared when the browser is idle, so page loads stay quick.
   const shapeCache = [];
-  const shape = (i) => shapeCache[i] || (shapeCache[i] = buildShards(SHAPE_MAKERS[i](), CFG.shards));
+  const shape = (i) => shapeCache[i] || (shapeCache[i] = makeShape(i, CFG.shards));
   const whenIdle = window.requestIdleCallback
     ? (fn) => window.requestIdleCallback(fn, { timeout: 2000 })
     : (fn) => setTimeout(fn, 300);
@@ -135,7 +93,7 @@ function init(canvas) {
     roughness: 0.4,
     metalness: 0.15,
     transparent: true,
-    opacity: 0.95,
+    opacity: CFG.opacity,
   };
   const frontMaterial = new MeshStandardMaterial({ ...materialOptions, side: FrontSide });
   const backMaterial = new MeshStandardMaterial({ ...materialOptions, side: BackSide });
@@ -166,23 +124,11 @@ function init(canvas) {
   const gap = new Float32Array(N).fill(1); // shard scale; < 1 while scattered
 
   // Remember which shape we're on as the reader moves between pages.
-  let from = loadShape();
+  let from = loadShape(SHAPE_COUNT);
   let to = from;
   let whole = true; // shards locked together into a solid shape
   let settleTimer = 0;
   resetToWhole(from);
-
-  function loadShape() {
-    try {
-      const v = parseInt(sessionStorage.getItem('bg-scene-shape'), 10);
-      return Number.isInteger(v) && v >= 0 && v < SHAPE_COUNT ? v : 0;
-    } catch (err) {
-      return 0;
-    }
-  }
-  function saveShape(i) {
-    try { sessionStorage.setItem('bg-scene-shape', String(i)); } catch (err) { /* private mode */ }
-  }
 
   function resetToWhole(i) {
     pos.set(shape(i).centroids);
@@ -214,7 +160,7 @@ function init(canvas) {
   function paint(t) {
     // Shards are ordered top to bottom, so hue runs down the shape like a rainbow,
     // and the whole spectrum slowly turns over time.
-    const drift = (t * CFG.hueDrift) % 1;
+    const drift = (t * CFG.hueDrift + hueShift) % 1;
     for (let i = 0; i < N; i++) {
       const h = (drift + (i / N) * CFG.hueSpan) % 1;
       tint.setHSL(h, tone.s, tone.l);
@@ -231,7 +177,6 @@ function init(canvas) {
 
   // ---- Layout ----
   let radius = 2;
-  let homeX = 0;
   function resize() {
     const w = window.innerWidth;
     const h = window.innerHeight;
@@ -242,7 +187,6 @@ function init(canvas) {
     const halfW = halfH * camera.aspect;
     // Always centred; the reading column scrolls over it. Wide screens get a larger shape.
     const wide = camera.aspect > 1.25;
-    homeX = 0;
     radius = Math.min(halfH * (wide ? 0.42 : 0.34), halfW * (wide ? 0.32 : 0.6));
   }
   resize();
@@ -279,9 +223,9 @@ function init(canvas) {
     }
     for (let i = 0; i < N; i++) {
       const ix = i * 3;
-      let dx = pos[ix] - lx;
-      let dy = pos[ix + 1] - ly;
-      let dz = pos[ix + 2] - lz;
+      const dx = pos[ix] - lx;
+      const dy = pos[ix + 1] - ly;
+      const dz = pos[ix + 2] - lz;
       const d = Math.hypot(dx, dy, dz) || 1;
       const speed = CFG.burst * (0.45 + rand() * 0.9);
       vel[ix] += (dx / d) * speed;
@@ -412,72 +356,39 @@ function init(canvas) {
   // Time spent paused is subtracted, so resuming continues smoothly instead of jumping, and
   // while paused the scene's time stands still at the moment of pausing. Kept in
   // sessionStorage so the pose stays continuous across page loads, paused or not.
-  const TIME_KEY = 'bg-scene-time';
-  let timeOffset = 0;
-  let pausedAt = 0;
-  function loadTime() {
-    try {
-      const t = JSON.parse(sessionStorage.getItem(TIME_KEY));
-      timeOffset = Number(t && t.offset) || 0;
-      pausedAt = Number(t && t.pausedAt) || 0;
-    } catch (err) { /* storage blocked: start from the wall clock */ }
-  }
-  function saveTime() {
-    try { sessionStorage.setItem(TIME_KEY, JSON.stringify({ offset: timeOffset, pausedAt })); } catch (err) { /* blocked */ }
-  }
-  loadTime();
+  let { offset: timeOffset, pausedAt, idleShift, hueShift } = loadTime();
+  const saveClock = () => saveTime({ offset: timeOffset, pausedAt, idleShift, hueShift });
   const animTime = () => (paused && pausedAt ? pausedAt : clock()) - timeOffset;
 
   function place(t, dt) {
     // The shape leans gently toward the pointer. It never lights up or swells on hover.
     if (hovering) lean.lerp(ndc, Math.min(1, dt * CFG.followSpeed));
     else lean.multiplyScalar(1 - Math.min(1, dt * CFG.followSpeed));
-    group.position.set(homeX + Math.cos(t * 0.31) * 0.12, Math.sin(t * 0.6) * 0.22, 0);
+    group.position.set(Math.cos(t * 0.31) * 0.12, Math.sin(t * 0.6) * 0.22, 0);
     group.rotation.set(
       Math.sin(t * 0.23) * 0.35 - lean.y * CFG.hoverLean,
-      t * 0.22 * CFG.idle + lean.x * CFG.hoverLean,
+      t * 0.22 * CFG.idle + idleShift + lean.x * CFG.hoverLean,
       Math.sin(t * 0.17) * 0.12,
     );
     group.scale.setScalar(radius * CFG.size);
   }
 
-  function render() {
-    renderer.render(scene, camera);
-  }
+  const render = () => renderer.render(scene, camera);
 
   // ---- Carrying a shatter over to the next page ----
   // When the reader leaves mid-shatter, the shard state goes into sessionStorage; the next
   // page restores it and fast-forwards by the time the navigation took.
-  const SNAPSHOT_KEY = 'bg-scene-snapshot';
   const SNAPSHOT_MAX_AGE = 30; // seconds; older than this, just show the finished shape
   const snapshotFields = [pos, vel, quat, angVel, recover, morph, gap];
 
-  function discardSnapshot() {
-    try { sessionStorage.removeItem(SNAPSHOT_KEY); } catch (err) { /* blocked */ }
-  }
-
   function saveSnapshot() {
-    try {
-      // A paused page never hands its frozen shards on: the next page shows the finished shape.
-      if (whole || paused) {
-        sessionStorage.removeItem(SNAPSHOT_KEY);
-        return;
-      }
-      sessionStorage.setItem(SNAPSHOT_KEY, JSON.stringify({
-        v: 1, n: N, at: Date.now(), from, to, settleTimer,
-        data: snapshotFields.map(toBase64),
-      }));
-    } catch (err) { /* storage full or blocked: the next page just shows the finished shape */ }
+    // A paused page never hands its frozen shards on: the next page shows the finished shape.
+    if (whole || paused) clearSnapshot();
+    else storeSnapshot({ v: 1, n: N, at: Date.now(), from, to, settleTimer, data: snapshotFields.map(toBase64) });
   }
 
   function restoreSnapshot() {
-    let snap;
-    try {
-      snap = JSON.parse(sessionStorage.getItem(SNAPSHOT_KEY));
-      sessionStorage.removeItem(SNAPSHOT_KEY);
-    } catch (err) {
-      return false;
-    }
+    const snap = takeSnapshot();
     const age = snap ? (Date.now() - snap.at) / 1000 : -1;
     if (!snap || snap.v !== 1 || snap.n !== N || !(age >= 0 && age <= SNAPSHOT_MAX_AGE)) return false;
     if (![snap.from, snap.to].every((i) => Number.isInteger(i) && i >= 0 && i < SHAPE_COUNT)) return false;
@@ -505,18 +416,18 @@ function init(canvas) {
     if (!e.persisted) return;
     // Other pages may have paused/resumed the animation, moved the time offset or advanced the
     // shape while this one sat in the cache; pick all of that up.
-    loadTime();
+    ({ offset: timeOffset, pausedAt, idleShift, hueShift } = loadTime());
     const pref = loadMotionPref();
     if (pref !== null && pref !== paused) setPaused(pref, false);
     if (paused) {
-      const current = loadShape();
+      const current = loadShape(SHAPE_COUNT);
       if (!whole || current !== to) resetToWhole(current);
-      discardSnapshot();
+      clearSnapshot();
       showStill();
       return;
     }
     if (!restoreSnapshot()) {
-      const current = loadShape();
+      const current = loadShape(SHAPE_COUNT);
       if (!whole || current !== to) resetToWhole(current);
     }
   });
@@ -594,13 +505,11 @@ function init(canvas) {
       pausedAt = 0;
       start();
     }
-    saveTime();
+    saveClock();
     // A toggle button keeps one name (and tooltip); aria-pressed carries the state (WAI-ARIA APG).
     if (pauseBtn) pauseBtn.setAttribute('aria-pressed', String(p));
     if (shatterBtn) shatterBtn.disabled = p;
-    if (save) {
-      try { localStorage.setItem(MOTION_KEY, p ? 'paused' : 'playing'); } catch (err) { /* storage blocked */ }
-    }
+    if (save) saveMotionPref(p);
   }
 
   // WCAG 2.1.1 (Keyboard): the shatter isn't mouse-only; this button bursts the shape from its centre.
@@ -612,209 +521,36 @@ function init(canvas) {
   if (pauseBtn) pauseBtn.addEventListener('click', () => setPaused(!paused));
   if (shatterBtn) shatterBtn.addEventListener('click', () => { if (!paused) shatterFromCentre(); });
 
-  // ---- Effect settings (sliders in the gear panel; layouts/_partials/scene_controls.html) ----
-  // [key in CFG, label, min, max, step]. Changes apply live, are remembered, and redraw the
-  // still frame when paused. The spin cap in step() (WCAG 2.3.1) holds whatever is chosen here.
-  const FX = [
-    ['burst', 'Shatter speed', 0.5, 6, 0.1],
-    ['regatherSeconds', 'Regather time (s)', 1, 15, 0.5],
-    ['stiffness', 'Pull strength', 0.5, 6, 0.1],
-    ['spinBurst', 'Shard spin', 0, 9, 0.5],
-    ['edgeMargin', 'Off-screen limit', 0, 1, 0.01],
-    ['wallStiffness', 'Edge pushback', 5, 100, 1],
-    ['hoverLean', 'Hover tilt', 0, 1.5, 0.05],
-    ['followSpeed', 'Follow speed', 0.5, 20, 0.5],
-    ['idle', 'Idle rotation', 0, 2, 0.05],
-    ['size', 'Size', 0.5, 1.5, 0.05],
-    ['opacity', 'Opacity', 0.2, 1, 0.05],
-    ['light', 'Brightness', 0.5, 2, 0.05],
-    ['hueSpan', 'Colour spread', 0, 1, 0.05],
-    ['hueDrift', 'Colour drift', 0, 0.1, 0.005],
-  ];
-  const FX_KEY = 'bg-fx';
+  // Effect sliders (fx-panel.js). Changes apply live, and redraw the still frame when paused.
+  let lastIdle = CFG.idle;
+  let lastDrift = CFG.hueDrift;
   function applyFx() {
+    // Rotation and colour are speed x absolute time, so changing a speed would make them jump
+    // by (time x change). Shift their phase by the opposite amount to keep them where they are.
+    const t = animTime();
+    if (CFG.idle !== lastIdle || CFG.hueDrift !== lastDrift) {
+      idleShift += t * 0.22 * (lastIdle - CFG.idle);
+      hueShift = (hueShift + t * (lastDrift - CFG.hueDrift)) % 1;
+      lastIdle = CFG.idle;
+      lastDrift = CFG.hueDrift;
+      saveClock();
+    }
     frontMaterial.opacity = backMaterial.opacity = CFG.opacity;
     hemi.intensity = HEMI_BASE * CFG.light;
     sun.intensity = SUN_BASE * CFG.light;
     if (paused) showStill();
   }
-  function saveFx() {
-    const changed = {};
-    for (const [key] of FX) if (CFG[key] !== FX_DEFAULTS[key]) changed[key] = CFG[key];
-    try {
-      if (Object.keys(changed).length) localStorage.setItem(FX_KEY, JSON.stringify(changed));
-      else localStorage.removeItem(FX_KEY);
-    } catch (err) { /* storage blocked */ }
-  }
-  try {
-    const saved = JSON.parse(localStorage.getItem(FX_KEY)) || {};
-    for (const [key, , min, max] of FX) {
-      const v = Number(saved[key]);
-      if (key in saved && Number.isFinite(v)) CFG[key] = clamp(v, min, max);
-    }
-  } catch (err) { /* ignore a bad or blocked saved value */ }
-
-  const fxList = document.getElementById('scene-fx-list');
-  const fxInputs = [];
-  if (fxList) {
-    for (const [key, label, min, max, stepSize] of FX) {
-      const row = document.createElement('div');
-      row.className = 'scene-fx-row';
-      const id = 'fx-' + key;
-      const lab = document.createElement('label');
-      lab.htmlFor = id;
-      lab.textContent = label;
-      const out = document.createElement('output');
-      out.htmlFor = id;
-      const input = document.createElement('input');
-      Object.assign(input, { type: 'range', id, min, max, step: stepSize });
-      input.value = CFG[key];
-      const show = () => { out.textContent = String(+Number(input.value).toFixed(3)); };
-      input.addEventListener('input', () => {
-        CFG[key] = Number(input.value);
-        show();
-        saveFx();
-        applyFx();
-      });
-      show();
-      row.append(lab, out, input);
-      fxList.append(row);
-      fxInputs.push([key, input, show]);
-    }
-    const reset = document.getElementById('scene-fx-reset');
-    if (reset) reset.addEventListener('click', () => {
-      for (const [key, input, show] of fxInputs) { CFG[key] = FX_DEFAULTS[key]; input.value = CFG[key]; show(); }
-      saveFx();
-      applyFx();
-    });
-  }
+  initFxPanel(CFG, FX_DEFAULTS, applyFx);
   applyFx();
 
-  if (paused) discardSnapshot(); else restoreSnapshot();
+  // The wall test in step() needs the shape's real position and scale, so place it first.
+  place(animTime(), 0);
+  if (paused) clearSnapshot(); else restoreSnapshot();
   setPaused(paused, false); // draws the still frame when paused, starts the loop when playing
   if (!paused) showStill(); // first frame now, not on the next animation frame
   // Fade in on the first page of a visit only; later pages show it at full opacity at once,
   // so moving between pages never dips the shape's opacity.
-  try {
-    if (sessionStorage.getItem('bg-seen')) canvas.style.transition = 'none';
-    else sessionStorage.setItem('bg-seen', '1');
-  } catch (err) { /* storage blocked: just fade in */ }
+  if (!firstSceneOfVisit()) canvas.style.transition = 'none';
   canvas.classList.add('is-ready'); // fades the canvas in (see bg-scene.css)
   if (controls) controls.hidden = false;
 }
-
-// Turn a geometry into exactly `count` triangles (splitting the largest ones along their
-// longest edge, which keeps the surface unchanged), normalised to radius 1 and ordered
-// top-to-bottom in a snake pattern so shards travel to nearby spots when shapes change.
-function buildShards(geometry, count) {
-  const g = geometry.index ? geometry.toNonIndexed() : geometry;
-  g.computeBoundingSphere();
-  const { center, radius } = g.boundingSphere;
-  const src = g.attributes.position.array;
-  let tris = [];
-  for (let i = 0; i < src.length; i += 9) {
-    const t = new Float32Array(9);
-    for (let k = 0; k < 9; k += 3) {
-      t[k] = (src[i + k] - center.x) / radius;
-      t[k + 1] = (src[i + k + 1] - center.y) / radius;
-      t[k + 2] = (src[i + k + 2] - center.z) / radius;
-    }
-    tris.push(t);
-  }
-  if (tris.length > count) {
-    // Not expected with the shapes above; keep the largest so the silhouette survives.
-    tris.sort((a, b) => area(b) - area(a));
-    tris = tris.slice(0, count);
-  }
-  // Split in rounds: each round halves the largest triangles, up to the number still
-  // needed. Far cheaper than rescanning for the single largest one each time, and the
-  // pieces come out just as even.
-  while (tris.length < count) {
-    const order = tris.map((t, i) => [area(t), i]).sort((a, b) => b[0] - a[0]);
-    const n = Math.min(order.length, count - tris.length);
-    for (let k = 0; k < n; k++) {
-      const i = order[k][1];
-      const [t1, t2] = split(tris[i]);
-      tris[i] = t1;
-      tris.push(t2);
-    }
-  }
-
-  const BANDS = 14;
-  const keyed = tris.map((t) => {
-    const cx = (t[0] + t[3] + t[6]) / 3;
-    const cy = (t[1] + t[4] + t[7]) / 3;
-    const cz = (t[2] + t[5] + t[8]) / 3;
-    const len = Math.hypot(cx, cy, cz) || 1;
-    const lat = Math.asin(clamp(cy / len, -1, 1)); // -pi/2 .. pi/2
-    const band = Math.min(BANDS - 1, Math.floor(((Math.PI / 2 - lat) / Math.PI) * BANDS));
-    let lon = (Math.atan2(cz, cx) + Math.PI) / (2 * Math.PI);
-    if (band % 2) lon = 1 - lon;
-    return { t, cx, cy, cz, key: band + lon };
-  });
-  keyed.sort((a, b) => a.key - b.key);
-
-  const centroids = new Float32Array(count * 3);
-  const locals = new Float32Array(count * 9);
-  keyed.forEach(({ t, cx, cy, cz }, i) => {
-    centroids.set([cx, cy, cz], i * 3);
-    for (let k = 0; k < 9; k += 3) {
-      locals[i * 9 + k] = t[k] - cx;
-      locals[i * 9 + k + 1] = t[k + 1] - cy;
-      locals[i * 9 + k + 2] = t[k + 2] - cz;
-    }
-  });
-  g.dispose();
-  geometry.dispose();
-  return { centroids, locals };
-}
-
-function area(t) {
-  const ux = t[3] - t[0], uy = t[4] - t[1], uz = t[5] - t[2];
-  const vx = t[6] - t[0], vy = t[7] - t[1], vz = t[8] - t[2];
-  return 0.5 * Math.hypot(uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx);
-}
-
-function split(t) {
-  // Bisect the longest edge; both halves keep the original winding.
-  const d = (a, b) => Math.hypot(t[a] - t[b], t[a + 1] - t[b + 1], t[a + 2] - t[b + 2]);
-  const e = [d(0, 3), d(3, 6), d(6, 0)];
-  const longest = e.indexOf(Math.max(...e));
-  // Rotate so the longest edge is A→B.
-  const order = [[0, 3, 6], [3, 6, 0], [6, 0, 3]][longest];
-  const A = [t[order[0]], t[order[0] + 1], t[order[0] + 2]];
-  const B = [t[order[1]], t[order[1] + 1], t[order[1] + 2]];
-  const C = [t[order[2]], t[order[2] + 1], t[order[2] + 2]];
-  const M = [(A[0] + B[0]) / 2, (A[1] + B[1]) / 2, (A[2] + B[2]) / 2];
-  return [Float32Array.from([...A, ...M, ...C]), Float32Array.from([...M, ...B, ...C])];
-}
-
-function toBase64(arr) {
-  const bytes = new Uint8Array(arr.buffer, arr.byteOffset, arr.byteLength);
-  let s = '';
-  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
-  return btoa(s);
-}
-
-function fromBase64(str, length) {
-  const s = atob(str);
-  const out = new Float32Array(length);
-  if (s.length !== out.byteLength) throw new Error('snapshot size mismatch');
-  const bytes = new Uint8Array(out.buffer);
-  for (let i = 0; i < s.length; i++) bytes[i] = s.charCodeAt(i);
-  return out;
-}
-
-function mulberry32(seed) {
-  let a = seed >>> 0;
-  return function () {
-    a = (a + 0x6d2b79f5) >>> 0;
-    let t = a;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
-function lerp(a, b, t) { return a + (b - a) * t; }
-function smoothstep(x) { return x * x * (3 - 2 * x); }
