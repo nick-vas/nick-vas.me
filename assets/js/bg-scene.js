@@ -61,9 +61,17 @@ function init(canvas) {
     stiffness: 2.5,
     spinBurst: 9,
     hoverLean: 0.35,
+    followSpeed: 8, // how fast the tilt chases the pointer (was 2)
     hueSpan: 0.85, // how much of the spectrum the gradient covers, top to bottom
     hueDrift: 0.015, // spectrum turns per second
+    idle: 1, // speed of the slow idle rotation, 1 = normal
+    size: 1, // shape size, 1 = normal
+    opacity: 0.95,
+    light: 1, // brightness of the lights, 1 = normal
+    edgeMargin: 0.05, // how far shards may travel past the screen edge (0 = stay on screen)
+    wallStiffness: 40, // how firmly shards are pushed back from that limit
   };
+  const FX_DEFAULTS = { ...CFG };
 
   let renderer;
   try {
@@ -78,8 +86,10 @@ function init(canvas) {
   const scene = new Scene();
   const camera = new PerspectiveCamera(CFG.fov, 1, 0.1, 100);
   camera.position.set(0, 0, CFG.camZ);
-  const hemi = new HemisphereLight(0xffffff, 0x445066, 1.4);
-  const sun = new DirectionalLight(0xffffff, 1.8);
+  const HEMI_BASE = 1.4;
+  const SUN_BASE = 1.8;
+  const hemi = new HemisphereLight(0xffffff, 0x445066, HEMI_BASE);
+  const sun = new DirectionalLight(0xffffff, SUN_BASE);
   sun.position.set(5, 8, 10);
   scene.add(hemi, sun);
 
@@ -195,7 +205,6 @@ function init(canvas) {
     light: { s: 0.85, l: 0.48, backL: 0.42 },
   };
   let tone = TONES.dark;
-  const accent = new Color();
   const tint = new Color();
   function applyTheme() {
     const dark = document.documentElement.dataset.theme !== 'light';
@@ -215,8 +224,6 @@ function init(canvas) {
     }
     frontGeometry.attributes.color.needsUpdate = true;
     backGeometry.attributes.color.needsUpdate = true;
-    // Hover glow uses the complement of the shape's middle colour.
-    accent.setHSL((drift + CFG.hueSpan / 2 + 0.5) % 1, 0.9, 0.6);
   }
   applyTheme();
   new MutationObserver(() => { applyTheme(); if (paused) { paint(animTime()); render(); } })
@@ -233,9 +240,9 @@ function init(canvas) {
     camera.updateProjectionMatrix();
     const halfH = Math.tan((CFG.fov * Math.PI) / 360) * CFG.camZ;
     const halfW = halfH * camera.aspect;
-    // On wide screens sit to the right of the reading column; otherwise centre it.
+    // Always centred; the reading column scrolls over it. Wide screens get a larger shape.
     const wide = camera.aspect > 1.25;
-    homeX = wide ? halfW * 0.5 : 0;
+    homeX = 0;
     radius = Math.min(halfH * (wide ? 0.42 : 0.34), halfW * (wide ? 0.32 : 0.6));
   }
   resize();
@@ -245,7 +252,6 @@ function init(canvas) {
   const ndc = new Vector2();
   let hovering = false;
   const lean = new Vector2();
-  let glow = 0;
 
   function pointOnShapePlane(x, y, out) {
     ndc.set((x / window.innerWidth) * 2 - 1, -(y / window.innerHeight) * 2 + 1);
@@ -291,11 +297,22 @@ function init(canvas) {
   const MAX_SPIN = 2 * Math.PI; // rad/s: at most one turn per second (see WCAG 2.3.1 note in step)
   const SETTLE_DIST = 0.002; // shape radii (sum of |dx|+|dy|+|dz|)
   const SETTLE_SPEED = 0.01;
+  // Soft walls just outside the viewport: a shard's centre may go a little past the edge (so a
+  // shatter still looks like it bursts off-screen) but is eased back instead of flying away.
+  // CFG.edgeMargin: how far past the edge, as a fraction of the half-height visible at the
+  // shard's depth. CFG.wallStiffness: how firmly it is pushed back.
+  const TAN_HALF_FOV = Math.tan((CFG.fov * Math.PI) / 360);
+  const wp = new Vector3();
+  const wall = new Vector3();
+  const qInv = new Quaternion();
+
   function step(dt) {
     const K = CFG.stiffness;
     const critical = 2 * Math.sqrt(K);
     const target = shape(to).centroids;
     let settled = true;
+    qInv.copy(group.quaternion).invert();
+    const gscale = group.scale.x || 1;
 
     for (let i = 0; i < N; i++) {
       const ix = i * 3;
@@ -310,6 +327,24 @@ function init(canvas) {
         const a = k * (target[ix + c] - pos[ix + c]) - damping * vel[ix + c];
         vel[ix + c] += a * dt;
         pos[ix + c] += vel[ix + c] * dt;
+      }
+
+      // Where is this shard on screen? Past the edge plus the margin, push it back in.
+      wp.set(pos[ix], pos[ix + 1], pos[ix + 2]).multiplyScalar(gscale).applyQuaternion(group.quaternion).add(group.position);
+      const halfH = TAN_HALF_FOV * Math.max(1, CFG.camZ - wp.z);
+      const maxY = halfH * (1 + CFG.edgeMargin);
+      const maxX = halfH * camera.aspect + halfH * CFG.edgeMargin;
+      const overX = wp.x > maxX ? wp.x - maxX : wp.x < -maxX ? wp.x + maxX : 0;
+      const overY = wp.y > maxY ? wp.y - maxY : wp.y < -maxY ? wp.y + maxY : 0;
+      if (overX || overY) {
+        wall.set(-overX, -overY, 0).multiplyScalar(CFG.wallStiffness * dt / gscale).applyQuaternion(qInv);
+        vel[ix] += wall.x;
+        vel[ix + 1] += wall.y;
+        vel[ix + 2] += wall.z;
+        const brake = 1 - Math.min(1, dt * 3);
+        vel[ix] *= brake;
+        vel[ix + 1] *= brake;
+        vel[ix + 2] *= brake;
       }
 
       // Tumble, with the spin bleeding off and the shard easing back to its resting orientation.
@@ -394,27 +429,16 @@ function init(canvas) {
   const animTime = () => (paused && pausedAt ? pausedAt : clock()) - timeOffset;
 
   function place(t, dt) {
-    if (hovering) {
-      raycaster.setFromCamera(ndc, camera);
-      lean.lerp(ndc, Math.min(1, dt * 2));
-      const o = raycaster.ray.origin;
-      const d = raycaster.ray.direction;
-      const s = (group.position.z - o.z) / d.z;
-      const dist = Math.hypot(o.x + d.x * s - group.position.x, o.y + d.y * s - group.position.y);
-      glow += ((dist < radius * 1.15 ? 1 : 0) - glow) * Math.min(1, dt * 4);
-    } else {
-      lean.multiplyScalar(1 - Math.min(1, dt * 2));
-      glow *= 1 - Math.min(1, dt * 4);
-    }
+    // The shape leans gently toward the pointer. It never lights up or swells on hover.
+    if (hovering) lean.lerp(ndc, Math.min(1, dt * CFG.followSpeed));
+    else lean.multiplyScalar(1 - Math.min(1, dt * CFG.followSpeed));
     group.position.set(homeX + Math.cos(t * 0.31) * 0.12, Math.sin(t * 0.6) * 0.22, 0);
     group.rotation.set(
       Math.sin(t * 0.23) * 0.35 - lean.y * CFG.hoverLean,
-      t * 0.22 + lean.x * CFG.hoverLean,
+      t * 0.22 * CFG.idle + lean.x * CFG.hoverLean,
       Math.sin(t * 0.17) * 0.12,
     );
-    group.scale.setScalar(radius * (1 + glow * 0.04));
-    frontMaterial.emissive.copy(accent).multiplyScalar(glow * 0.3);
-    backMaterial.emissive.copy(frontMaterial.emissive);
+    group.scale.setScalar(radius * CFG.size);
   }
 
   function render() {
@@ -560,11 +584,10 @@ function init(canvas) {
     if (p) {
       stop();
       if (!pausedAt) pausedAt = clock(); // keep an earlier page's pause moment, so the pose matches
-      // Drop the cursor lean and glow too, so the paused pose depends only on time and is the
+      // Drop the cursor lean too, so the paused pose depends only on time and is the
       // same on every page (otherwise it would jump on the next page load).
       hovering = false;
       lean.set(0, 0);
-      glow = 0;
       showStill();
     } else {
       if (pausedAt) timeOffset += clock() - pausedAt;
@@ -589,9 +612,93 @@ function init(canvas) {
   if (pauseBtn) pauseBtn.addEventListener('click', () => setPaused(!paused));
   if (shatterBtn) shatterBtn.addEventListener('click', () => { if (!paused) shatterFromCentre(); });
 
+  // ---- Effect settings (sliders in the gear panel; layouts/_partials/scene_controls.html) ----
+  // [key in CFG, label, min, max, step]. Changes apply live, are remembered, and redraw the
+  // still frame when paused. The spin cap in step() (WCAG 2.3.1) holds whatever is chosen here.
+  const FX = [
+    ['burst', 'Shatter speed', 0.5, 6, 0.1],
+    ['regatherSeconds', 'Regather time (s)', 1, 15, 0.5],
+    ['stiffness', 'Pull strength', 0.5, 6, 0.1],
+    ['spinBurst', 'Shard spin', 0, 9, 0.5],
+    ['edgeMargin', 'Off-screen limit', 0, 1, 0.01],
+    ['wallStiffness', 'Edge pushback', 5, 100, 1],
+    ['hoverLean', 'Hover tilt', 0, 1.5, 0.05],
+    ['followSpeed', 'Follow speed', 0.5, 20, 0.5],
+    ['idle', 'Idle rotation', 0, 2, 0.05],
+    ['size', 'Size', 0.5, 1.5, 0.05],
+    ['opacity', 'Opacity', 0.2, 1, 0.05],
+    ['light', 'Brightness', 0.5, 2, 0.05],
+    ['hueSpan', 'Colour spread', 0, 1, 0.05],
+    ['hueDrift', 'Colour drift', 0, 0.1, 0.005],
+  ];
+  const FX_KEY = 'bg-fx';
+  function applyFx() {
+    frontMaterial.opacity = backMaterial.opacity = CFG.opacity;
+    hemi.intensity = HEMI_BASE * CFG.light;
+    sun.intensity = SUN_BASE * CFG.light;
+    if (paused) showStill();
+  }
+  function saveFx() {
+    const changed = {};
+    for (const [key] of FX) if (CFG[key] !== FX_DEFAULTS[key]) changed[key] = CFG[key];
+    try {
+      if (Object.keys(changed).length) localStorage.setItem(FX_KEY, JSON.stringify(changed));
+      else localStorage.removeItem(FX_KEY);
+    } catch (err) { /* storage blocked */ }
+  }
+  try {
+    const saved = JSON.parse(localStorage.getItem(FX_KEY)) || {};
+    for (const [key, , min, max] of FX) {
+      const v = Number(saved[key]);
+      if (key in saved && Number.isFinite(v)) CFG[key] = clamp(v, min, max);
+    }
+  } catch (err) { /* ignore a bad or blocked saved value */ }
+
+  const fxList = document.getElementById('scene-fx-list');
+  const fxInputs = [];
+  if (fxList) {
+    for (const [key, label, min, max, stepSize] of FX) {
+      const row = document.createElement('div');
+      row.className = 'scene-fx-row';
+      const id = 'fx-' + key;
+      const lab = document.createElement('label');
+      lab.htmlFor = id;
+      lab.textContent = label;
+      const out = document.createElement('output');
+      out.htmlFor = id;
+      const input = document.createElement('input');
+      Object.assign(input, { type: 'range', id, min, max, step: stepSize });
+      input.value = CFG[key];
+      const show = () => { out.textContent = String(+Number(input.value).toFixed(3)); };
+      input.addEventListener('input', () => {
+        CFG[key] = Number(input.value);
+        show();
+        saveFx();
+        applyFx();
+      });
+      show();
+      row.append(lab, out, input);
+      fxList.append(row);
+      fxInputs.push([key, input, show]);
+    }
+    const reset = document.getElementById('scene-fx-reset');
+    if (reset) reset.addEventListener('click', () => {
+      for (const [key, input, show] of fxInputs) { CFG[key] = FX_DEFAULTS[key]; input.value = CFG[key]; show(); }
+      saveFx();
+      applyFx();
+    });
+  }
+  applyFx();
+
   if (paused) discardSnapshot(); else restoreSnapshot();
   setPaused(paused, false); // draws the still frame when paused, starts the loop when playing
   if (!paused) showStill(); // first frame now, not on the next animation frame
+  // Fade in on the first page of a visit only; later pages show it at full opacity at once,
+  // so moving between pages never dips the shape's opacity.
+  try {
+    if (sessionStorage.getItem('bg-seen')) canvas.style.transition = 'none';
+    else sessionStorage.setItem('bg-seen', '1');
+  } catch (err) { /* storage blocked: just fade in */ }
   canvas.classList.add('is-ready'); // fades the canvas in (see bg-scene.css)
   if (controls) controls.hidden = false;
 }

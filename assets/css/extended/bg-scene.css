@@ -17,10 +17,7 @@
     opacity: 1;
 }
 
-/* Dimmer on every page except home, so text stays easy to read. */
-#bg-scene.is-ready.is-quiet {
-    opacity: 0.4;
-}
+/* Same opacity on every page; text contrast is handled by the halo in a11y.css. */
 
 /* The page-to-page crossfade lives in layouts/_partials/extend_head.html, because Hugo's
    CSS minifier drops the @view-transition rule. */

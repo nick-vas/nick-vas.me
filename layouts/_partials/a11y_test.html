@@ -9,7 +9,9 @@
 */ -}}
 {{- if hugo.IsServer }}
 <style>
-    .sim-text { font-size: 200%; }
+    /* PaperMod sizes text in px, so scaling the root font size does nothing; zoom the content
+       (not the fixed controls) instead. */
+    .sim-text .header, .sim-text .main, .sim-text .footer { zoom: 2; }
     .sim-gray { filter: grayscale(1); }
     .sim-outline * { outline: 1px solid rgba(255, 0, 100, .6) !important; }
     #a11y-test { position: fixed; right: 16px; bottom: 16px; z-index: 1000; font: 14px/1.4 system-ui, sans-serif;

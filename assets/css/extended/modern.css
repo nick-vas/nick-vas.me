@@ -118,6 +118,46 @@
     }
 }
 
+/* Gap decorations (CSS-Tricks, "Gap Decorations Are Now Available"): `column-rule` now draws
+   a rule in the gap of flex and grid containers, not just multicol. Browsers without it ignore
+   the declaration and keep the plain gap. */
+.menu,
+.post-tags,
+.terms-tags {
+    column-rule: 1px solid var(--tertiary);
+}
+
+/* Animated border-image (CSS-Tricks, "Animating CSS border-image"): a slowly drifting
+   rainbow rule under the post title, echoing the background shape. --rule-hue is a registered
+   property so the gradient's hues can animate. */
+@property --rule-hue {
+    syntax: "<number>";
+    inherits: false;
+    initial-value: 0;
+}
+
+.post-header {
+    border-bottom: 3px solid;
+    border-image: linear-gradient(90deg,
+            oklch(0.75 0.15 calc(var(--rule-hue))),
+            oklch(0.75 0.15 calc(var(--rule-hue) + 90)),
+            oklch(0.75 0.15 calc(var(--rule-hue) + 180)),
+            oklch(0.75 0.15 calc(var(--rule-hue) + 270))) 1;
+    padding-bottom: 0.5rem;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+    html:not(.sim-rm) .post-header {
+        animation: rule-drift 20s linear infinite;
+    }
+}
+
+@keyframes rule-drift {
+    to {
+        --rule-hue: 360;
+    }
+}
+
 @media (forced-colors: active) {
     body::before {
         display: none;

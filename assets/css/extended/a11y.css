@@ -177,6 +177,69 @@ input, textarea, select, button, .scene-controls, .skip-link, mark {
     display: block;
 }
 
+/* Effect sliders: a gear button that opens a panel above the controls. */
+/* No position here on purpose: the panel is placed against the fixed controls bar, so it
+   starts at the viewport's left margin instead of running off the right edge on phones. */
+.scene-fx > summary {
+    list-style: none;
+}
+
+.scene-fx > summary::-webkit-details-marker {
+    display: none;
+}
+
+.scene-fx[open] > summary {
+    background: var(--border);
+}
+
+.scene-fx-panel {
+    position: absolute;
+    left: 0;
+    bottom: 52px;
+    width: min(300px, calc(100vw - 32px));
+    max-height: min(70vh, 520px);
+    overflow-y: auto;
+    padding: 12px 14px;
+    border: 1px solid var(--tertiary);
+    border-radius: var(--radius);
+    background: var(--entry);
+    color: var(--primary);
+    font-size: 14px;
+}
+
+.scene-fx-row {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 2px 8px;
+    margin-bottom: 10px;
+}
+
+.scene-fx-row input[type="range"] {
+    grid-column: 1 / -1;
+    width: 100%;
+    min-height: 24px; /* 2.5.8 Target Size */
+}
+
+.scene-fx-reset {
+    min-height: 44px;
+    width: 100%;
+    border: 1px solid var(--tertiary);
+    border-radius: var(--radius);
+    background: var(--code-bg);
+    color: var(--primary);
+    cursor: pointer;
+}
+
+.scene-fx-reset:hover {
+    background: var(--border);
+}
+
+.scene-fx-reset:focus-visible,
+.scene-fx-row input:focus-visible {
+    outline: 3px solid var(--primary);
+    outline-offset: 2px;
+}
+
 /* 2.4.7 Focus Visible (and 2.4.13-style thickness) for the new controls and skip link. */
 .scene-btn:focus-visible,
 .skip-link:focus-visible {
