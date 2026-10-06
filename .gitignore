@@ -1,7 +1,7 @@
 # Hugo build output and caches
 /public/
 /resources/_gen/
-/.hugo_build.lock
+.hugo_build.lock
 
 # Node (the test tooling in tests/)
 node_modules/

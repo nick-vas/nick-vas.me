@@ -7,8 +7,9 @@ set -uo pipefail
 src=$(cd "$(dirname "$0")/../.." && pwd)
 work=$(mktemp -d); trap 'rm -rf "$work"' EXIT
 mkdir -p "$work/repo/deploy" "$work/bin" "$work/remote"
-cp "$src"/deploy/{deploy,rollback,remote-switch}.sh "$work/repo/deploy/"
+cp "$src"/deploy/{deploy,build,rollback,remote-switch}.sh "$work/repo/deploy/"
 cd "$work/repo" || exit 1
+mkdir -p themes/PaperMod/layouts # build.sh refuses to run without the theme
 git init -q . && git config user.email t@t && git config user.name t && git add -A && git commit -qm init
 
 # Fake hugo: builds public/ with a page that changes with $BUILD_TAG, plus an unchanged asset.

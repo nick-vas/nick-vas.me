@@ -31,6 +31,10 @@ jobs:
           hugo-version: ${{ env.HUGO_VERSION }}
           extended: true
 
+      # Hugo only warns (and exits 0) when the theme is missing, then builds a nearly empty site.
+      - name: Check the theme submodule is present
+        run: test -d themes/PaperMod/layouts || { echo "::error::themes/PaperMod is empty; the submodule was not checked out"; exit 1; }
+
       # Same flags as deploy/deploy.sh, so a minifier surprise shows up here and not in production.
       - run: hugo --minify --baseURL "$CI_BASE_URL"
 

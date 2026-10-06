@@ -11,6 +11,21 @@ git clone --recurse-submodules https://github.com/nick-vas/nick-vas.me.git
 git submodule update --init --recursive
 ```
 
+## Running it locally
+
+| I want to... | Run (from the repo root) |
+| --- | --- |
+| Edit with live reload and drafts | `hugo server -D`, then http://localhost:1313 |
+| See exactly what visitors get: the production build behind the real Nginx config (security headers, gzip, caching, rate limits) | `bash deploy/local.sh`, then http://localhost:8080 (includes the draft test posts; add `--no-drafts` to see only what is published; stop with `bash deploy/local.sh down`). Needs Docker. |
+| Run the browser tests against that Nginx | `cd tests && BASE_URL=http://localhost:8080 npx playwright test` |
+| Run the browser tests against a plain static copy of the build | `hugo --minify --baseURL http://localhost:4173/ && cd tests && npx playwright test` |
+| Run the deploy-script tests | `bash tests/deploy/remote-switch.test.sh` and `bash tests/deploy/deploy.test.sh` (Linux or WSL) |
+| Health-check any running copy of the site | `bash deploy/verify.sh http://localhost:8080` |
+
+Run `hugo` from the repo root: it does not look in parent folders, so running it from `tests/`
+(or anywhere else) finds no theme and prints "found no layout file" warnings, and
+`hugo server` then answers 404 on every page.
+
 ## Writing
 
 ```sh
@@ -153,7 +168,7 @@ same opacity on every page, and carries over as you move between pages.
 | Browsers | Playwright on Chromium, Firefox, WebKit, Pixel 7 and iPhone 14 profiles: no JS errors, no sideways scroll, the scene starts (or falls back cleanly without WebGL), the gear panel fits and closes with Escape, 44px targets, and a click/slider stress burst. Chromium also runs axe (WCAG 2.2 AA) in dark and light. |
 | Lighthouse | Accessibility must stay at 95+; performance, best-practices, SEO and bundle size are warnings. |
 
-Run the browser tests locally:
+Run the browser tests locally (see also [Running it locally](#running-it-locally)):
 
 ```sh
 hugo --minify --baseURL http://localhost:4173/    # build into public/

@@ -11,14 +11,8 @@ keep=${KEEP_RELEASES:-5}
 case "$path" in /*) ;; *) echo "DEPLOY_PATH must be an absolute path, got: $path" >&2; exit 1 ;; esac
 cd "$(dirname "$0")/.."
 
-git submodule update --init --recursive
-hugo --minify --cleanDestinationDir
-
-# Pre-compress text files once, so Nginx serves them with gzip_static instead of
-# compressing on every request. Tiny files are skipped (not worth it). -n leaves the
-# timestamp out of the .gz, so unchanged files stay byte-identical between deploys.
-find public -type f \( -name '*.html' -o -name '*.css' -o -name '*.js' -o -name '*.json' \
-  -o -name '*.xml' -o -name '*.svg' -o -name '*.txt' \) -size +1k -exec gzip -9 -n -k -f {} +
+# Minified build with pre-compressed copies of the text files (see build.sh).
+bash deploy/build.sh
 
 release="$(date -u +%Y%m%d%H%M%S)-$(git rev-parse --short HEAD)"
 

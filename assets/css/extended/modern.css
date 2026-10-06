@@ -158,6 +158,12 @@
     }
 }
 
+/* Archive: no post count next to each month ("October 1"); the year keeps its total.
+   Hidden with CSS rather than a copy of the theme's archive template. */
+.archive-month-header .archive-count {
+    display: none;
+}
+
 @media (forced-colors: active) {
     body::before {
         display: none;

@@ -1,0 +1,14 @@
+# Nginx with the repo's real production config, serving public/ on http://localhost:8080.
+# Started by deploy/local.sh. Paths are relative to this file.
+name: nick-vas-local
+services:
+  nginx:
+    image: nginx:stable-alpine
+    ports:
+      - "${LOCAL_PORT:-8080}:80"
+    volumes:
+      # Same layout as the droplet: Nginx serves .../current.
+      - ../../public:/var/www/nick-vas.me/current:ro
+      - ../nginx/nick-vas.me.conf:/etc/nginx/conf.d/default.conf:ro
+      - ../nginx/rate-limit.conf:/etc/nginx/conf.d/00-nick-vas-rate-limit.conf:ro
+      - ../nginx/security-headers.conf:/etc/nginx/snippets/nick-vas-security.conf:ro
