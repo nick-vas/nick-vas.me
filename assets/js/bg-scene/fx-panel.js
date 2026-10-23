@@ -31,12 +31,6 @@ export function restoreFx(cfg) {
   }
 }
 
-// Puts `cfg` back to the defaults plus whatever is remembered now (another tab may have changed it).
-export function reloadFx(cfg, defaults) {
-  Object.assign(cfg, defaults);
-  restoreFx(cfg);
-}
-
 // Builds the panel and returns a function that redraws the sliders from `cfg`. `defaults` is a copy of the config before any saved values; `onChange`
 // runs after every change so the scene can apply it.
 export function initFxPanel(cfg, defaults, onChange) {

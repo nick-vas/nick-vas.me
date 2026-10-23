@@ -23,7 +23,7 @@ import {
   WebGLRenderer,
 } from './vendor/three.module.js';
 import { HEMI_BASE, SUN_BASE, createConfig } from './bg-scene/config.js';
-import { initFxPanel, reloadFx, restoreFx } from './bg-scene/fx-panel.js';
+import { initFxPanel, restoreFx } from './bg-scene/fx-panel.js';
 import { clamp, lerp, mulberry32, smoothstep } from './bg-scene/math.js';
 import { SHAPE_COUNT, makeShape } from './bg-scene/shards.js';
 import {
@@ -374,9 +374,15 @@ function init(canvas) {
   // while paused the scene's time stands still at the moment of pausing. Kept in localStorage
   // next to the pause choice, so every page and tab shows the same pose, paused or not. The
   // stored values are plain seconds (a pause can last days); the scene's time wraps every ~28 h.
-  let { offset: timeOffset, pausedAt, idleShift, hueShift } = loadTime(clock());
-  const saveClock = () => saveTime({ offset: timeOffset, pausedAt, idleShift, hueShift, speeds: [CFG.idle, CFG.hueDrift] });
+  const startTime = loadTime(clock());
+  let { offset: timeOffset, pausedAt, idleShift, hueShift } = startTime;
+  // The speeds idleShift/hueShift currently fit; applyFx re-phases them when the sliders differ.
+  let [lastIdle, lastDrift] = startTime.speeds || [CFG.idle, CFG.hueDrift];
+  const saveClock = () => saveTime({ offset: timeOffset, pausedAt, idleShift, hueShift, speeds: [lastIdle, lastDrift] });
   const animTime = () => ((paused && pausedAt ? pausedAt : clock()) - timeOffset) % 100000;
+  // The time the stored clock stands at (a stored pause moment counts even before this page applies
+  // it); speed changes are re-phased at this time, so every tab arrives at the same shifts.
+  const clockTime = () => ((pausedAt || clock()) - timeOffset) % 100000;
 
   function place(t, dt) {
     // The shape leans gently toward the pointer. It never lights up or swells on hover.
@@ -450,18 +456,14 @@ function init(canvas) {
   });
 
   // The clock and the sliders, as the last page or tab to change them left them. The clock's
-  // phase shifts only fit the slider speeds they were saved with, so both are taken together, and
-  // not at all while another tab is halfway through writing them (one slider move writes the
-  // sliders, then the clock; the second write's storage event brings this back).
+  // phase shifts fit the slider speeds stored with them; if the sliders have moved on since
+  // (another tab is between its two writes of a slider move), applyFx re-phases them.
   function loadShared() {
     const time = loadTime(clock());
-    const fx = { ...CFG };
-    reloadFx(fx, FX_DEFAULTS);
-    if (time.speeds && (time.speeds[0] !== fx.idle || time.speeds[1] !== fx.hueDrift)) return;
     ({ offset: timeOffset, pausedAt, idleShift, hueShift } = time);
-    Object.assign(CFG, fx);
-    lastIdle = CFG.idle; // the loaded shifts already account for these speeds
-    lastDrift = CFG.hueDrift;
+    Object.assign(CFG, FX_DEFAULTS);
+    restoreFx(CFG);
+    [lastIdle, lastDrift] = time.speeds || [CFG.idle, CFG.hueDrift];
     refreshFxPanel();
     applyFx();
   }
@@ -473,8 +475,8 @@ function init(canvas) {
     if (!isSharedKey(e.key) || syncFrame) return;
     syncFrame = requestAnimationFrame(() => {
       syncFrame = 0;
-      const pref = loadMotionPref();
       loadShared(); // redraws the still frame if paused
+      const pref = loadMotionPref();
       if (pref !== null && pref !== paused) setPaused(pref, false);
     });
   });
@@ -554,6 +556,8 @@ function init(canvas) {
     saveClock();
     // A toggle button keeps one name (and tooltip); aria-pressed carries the state (WAI-ARIA APG).
     if (pauseBtn) pauseBtn.setAttribute('aria-pressed', String(p));
+    // A pause from another tab can disable the button under keyboard focus; hand focus to Pause.
+    if (p && shatterBtn && pauseBtn && document.activeElement === shatterBtn) pauseBtn.focus();
     if (shatterBtn) shatterBtn.disabled = p;
     if (save) saveMotionPref(p);
   }
@@ -563,12 +567,10 @@ function init(canvas) {
   if (shatterBtn) shatterBtn.addEventListener('click', () => { if (!paused) shatterFrom(0, 0, 0); });
 
   // Effect sliders (fx-panel.js). Changes apply live, and redraw the still frame when paused.
-  let lastIdle = CFG.idle;
-  let lastDrift = CFG.hueDrift;
   function applyFx() {
     // Rotation and colour are speed x absolute time, so changing a speed would make them jump
     // by (time x change). Shift their phase by the opposite amount to keep them where they are.
-    const t = animTime();
+    const t = clockTime();
     if (CFG.idle !== lastIdle || CFG.hueDrift !== lastDrift) {
       idleShift += t * 0.22 * (lastIdle - CFG.idle);
       hueShift = (hueShift + t * (lastDrift - CFG.hueDrift)) % 1;

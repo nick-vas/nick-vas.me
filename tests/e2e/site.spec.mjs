@@ -111,10 +111,15 @@ test.describe('animation controls', () => {
   });
 
   test('pause and slider changes reach other open tabs without moving the shape', async ({ context, page }) => {
-    await open(page, '/');
+    const errors = await open(page, '/');
     test.skip((await page.locator('#bg-scene').count()) === 0, 'no WebGL in this browser');
     const other = await context.newPage();
-    const errors = await open(other, '/posts/');
+    const otherErrors = await open(other, '/posts/');
+    // A new tab fades its canvas in (0.3s); compare frames only once it is fully shown.
+    await expect.poll(() => other.evaluate(() => getComputedStyle(document.getElementById('bg-scene')).opacity)).toBe('1');
+    // Screenshots cover the canvas only: the page's own CSS animations (e.g. the drifting rule)
+    // would otherwise change the frame.
+    const canvasOnly = await other.addStyleTag({ content: 'body > :not(#bg-scene) { visibility: hidden !important; }' });
     await page.locator('#scene-pause').click();
     await expect(other.locator('#scene-pause')).toHaveAttribute('aria-pressed', 'true');
     const before = await other.locator('#bg-scene').screenshot();
@@ -127,9 +132,11 @@ test.describe('animation controls', () => {
     await expect(other.locator('#fx-idle')).toHaveValue('1.5');
     const after = await other.locator('#bg-scene').screenshot();
     expect(after.equals(before), 'paused pose in the other tab after a slider change').toBe(true);
+    await canvasOnly.evaluate((el) => el.remove());
     await other.locator('#scene-pause').click();
     await expect(page.locator('#scene-pause')).toHaveAttribute('aria-pressed', 'false');
     expect(errors).toEqual([]);
+    expect(otherErrors).toEqual([]);
   });
 
   test('stress: rapid clicks and slider changes cause no errors', async ({ page }) => {

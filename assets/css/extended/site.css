@@ -194,17 +194,16 @@ html {
 
 /* 2.4.11 at the very end of the page, where scroll-padding can't help: on narrow screens (and at
    200% zoom) the footer would sit under the fixed controls and the go-to-top button, so reserve
-   room below it (112px at the default font size). The class is set by bg-scene.js once the
-   controls are shown. Forced colours and print hide the controls and drop the room (end of file). */
-@media (max-width: 768px) {
+   room below it (112px at the default font size), up to PaperMod's 900px breakpoint for the
+   go-to-top button. The class is set by bg-scene.js once the controls are shown. The room stays in
+   forced colours, where the go-to-top button still shows; print drops it (end of file). */
+@media (max-width: 900px) {
     .has-scene-controls body {
         padding-bottom: max(68px, calc(6.5rem + 8px));
     }
-}
 
-/* PaperMod lifts the go-to-top button another 5rem on list pages up to 900px wide, above the
-   scroll padding and the footer room; keep it at its usual height. */
-@media (max-width: 900px) {
+    /* PaperMod lifts the go-to-top button another 5rem on list pages at these widths, above the
+       scroll padding and over the footer; the room above keeps it clear at its usual height. */
     .has-scene-controls .list .top-link {
         transform: none;
     }
@@ -516,10 +515,6 @@ html {
 
     body::before {
         display: none;
-    }
-
-    .has-scene-controls body {
-        padding-bottom: 0;
     }
 }
 
