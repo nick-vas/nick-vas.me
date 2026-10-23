@@ -27,7 +27,7 @@ import { initFxPanel, restoreFx } from './bg-scene/fx-panel.js';
 import { clamp, lerp, mulberry32, smoothstep } from './bg-scene/math.js';
 import { SHAPE_COUNT, makeShape } from './bg-scene/shards.js';
 import {
-  clearSnapshot, firstSceneOfVisit, fromBase64, loadMotionPref, loadShape, loadTime,
+  clearSnapshot, firstSceneOfVisit, fromBase64, isMotionKey, loadMotionPref, loadShape, loadTime,
   saveMotionPref, saveShape, saveTime, storeSnapshot, takeSnapshot, toBase64,
 } from './bg-scene/storage.js';
 
@@ -44,6 +44,8 @@ function init(canvas) {
   // scene_controls.html; the choice is remembered across pages. Only the dev-only test panel's
   // sim-rm class starts it paused with no saved choice.
   let paused = loadMotionPref() ?? document.documentElement.classList.contains('sim-rm');
+  // Windows High Contrast / forced colours: site.css hides the scene, so nothing should run.
+  const forcedColors = window.matchMedia('(forced-colors: active)');
 
   let renderer;
   try {
@@ -208,12 +210,13 @@ function init(canvas) {
 
   const IGNORE = 'a, button, input, textarea, select, label, summary, details, [role="button"], [contenteditable], pre, code, img, video, iframe, .post-entry, .toc, .header, .footer';
 
+  // Click point in the shape's local frame: shards fly out from the centre, pushed away from the click.
   function shatter(x, y) {
-    // Click point in the shape's local frame: shards fly out from the centre, pushed away from the click.
     const local = group.worldToLocal(pointOnShapePlane(x, y, v3));
-    const lx = local.x * 0.35;
-    const ly = local.y * 0.35;
-    const lz = local.z * 0.35;
+    shatterFrom(local.x * 0.35, local.y * 0.35, local.z * 0.35);
+  }
+
+  function shatterFrom(lx, ly, lz) {
     if (whole) {
       from = to;
       to = (to + 1) % SHAPE_COUNT;
@@ -238,7 +241,13 @@ function init(canvas) {
   }
 
   // ---- Simulation ----
-  const MAX_SPIN = 2 * Math.PI; // rad/s: at most one turn per second (see WCAG 2.3.1 note in step)
+  // WCAG 2.3.1 (Three Flashes). A tumbling shard swaps its rainbow face for the complementary one
+  // up to twice per turn. Each shard's total rotation (spin plus the ease back to rest) is capped
+  // at one turn per second; with the whole shape's own slow turn (0.22 rad/s at the default idle
+  // speed) and the cursor tilt (at most 1.4 rad/s at the default follow speed) on top, a shard
+  // turns at most ~7.9 rad/s relative to the viewer: at most ~2.5 face swaps a second, under the
+  // limit of 3, however fast anyone clicks.
+  const MAX_SPIN = 2 * Math.PI; // rad/s
   const SETTLE_DIST = 0.002; // shape radii (sum of |dx|+|dy|+|dz|)
   const SETTLE_SPEED = 0.01;
   // Soft walls just outside the viewport: a shard's centre may go a little past the edge (so a
@@ -249,6 +258,7 @@ function init(canvas) {
   const wp = new Vector3();
   const wall = new Vector3();
   const qInv = new Quaternion();
+  const qPrev = new Quaternion();
 
   function step(dt) {
     const K = CFG.stiffness;
@@ -293,12 +303,11 @@ function init(canvas) {
 
       // Tumble, with the spin bleeding off and the shard easing back to its resting orientation.
       q.fromArray(quat, i * 4);
+      qPrev.copy(q);
       let wx = angVel[ix], wy = angVel[ix + 1], wz = angVel[ix + 2];
       let w = Math.hypot(wx, wy, wz);
       if (w > MAX_SPIN) {
-        // WCAG 2.3.1 (Three Flashes): a tumbling shard swaps its rainbow face for the
-        // complementary one twice per turn. Capping spin at one turn per second keeps every
-        // shard under 3 flashes a second, however fast someone clicks (clicks add spin).
+        // Clicks add spin; keep the stored spin within the cap too, so it decays from there.
         const spinScale = MAX_SPIN / w;
         wx = angVel[ix] *= spinScale;
         wy = angVel[ix + 1] *= spinScale;
@@ -314,6 +323,10 @@ function init(canvas) {
       angVel[ix + 1] *= decay;
       angVel[ix + 2] *= decay;
       q.slerp(ident, 1 - Math.exp(-dt * 3 * r * r));
+      // Cap this frame's total turn (spin + ease back) at MAX_SPIN (see the 2.3.1 note above).
+      const turned = 2 * Math.acos(Math.min(1, Math.abs(qPrev.dot(q))));
+      const allowed = MAX_SPIN * dt;
+      if (turned > allowed) q.copy(qPrev.slerp(q, allowed / turned));
       q.toArray(quat, i * 4);
 
       if (settled && (
@@ -352,13 +365,14 @@ function init(canvas) {
   }
 
   // Wall-clock time keeps the hover motion in phase across page loads.
-  const clock = () => (Date.now() / 1000) % 100000;
+  const clock = () => Date.now() / 1000;
   // Time spent paused is subtracted, so resuming continues smoothly instead of jumping, and
-  // while paused the scene's time stands still at the moment of pausing. Kept in
-  // sessionStorage so the pose stays continuous across page loads, paused or not.
-  let { offset: timeOffset, pausedAt, idleShift, hueShift } = loadTime();
+  // while paused the scene's time stands still at the moment of pausing. Kept in localStorage
+  // next to the pause choice, so every page and tab shows the same pose, paused or not. The
+  // stored values are plain seconds (a pause can last days); the scene's time wraps every ~28 h.
+  let { offset: timeOffset, pausedAt, idleShift, hueShift } = loadTime(clock());
   const saveClock = () => saveTime({ offset: timeOffset, pausedAt, idleShift, hueShift });
-  const animTime = () => (paused && pausedAt ? pausedAt : clock()) - timeOffset;
+  const animTime = () => ((paused && pausedAt ? pausedAt : clock()) - timeOffset) % 100000;
 
   function place(t, dt) {
     // The shape leans gently toward the pointer. It never lights up or swells on hover.
@@ -416,20 +430,24 @@ function init(canvas) {
     if (!e.persisted) return;
     // Other pages may have paused/resumed the animation, moved the time offset or advanced the
     // shape while this one sat in the cache; pick all of that up.
-    ({ offset: timeOffset, pausedAt, idleShift, hueShift } = loadTime());
+    ({ offset: timeOffset, pausedAt, idleShift, hueShift } = loadTime(clock()));
+    const nextPaused = loadMotionPref() ?? paused;
+    // A paused page shows the current shape whole; a playing one resumes a carried-over shatter.
+    if (nextPaused || !restoreSnapshot()) {
+      const current = loadShape(SHAPE_COUNT);
+      if (!whole || current !== to) resetToWhole(current);
+    }
+    if (nextPaused) clearSnapshot();
+    setPaused(nextPaused, false); // draws the still frame once if paused, else resumes the loop
+  });
+
+  // Pausing or resuming in another tab applies here too (storage events fire in the other tabs).
+  window.addEventListener('storage', (e) => {
+    if (!isMotionKey(e.key)) return;
+    ({ offset: timeOffset, pausedAt, idleShift, hueShift } = loadTime(clock()));
     const pref = loadMotionPref();
     if (pref !== null && pref !== paused) setPaused(pref, false);
-    if (paused) {
-      const current = loadShape(SHAPE_COUNT);
-      if (!whole || current !== to) resetToWhole(current);
-      clearSnapshot();
-      showStill();
-      return;
-    }
-    if (!restoreSnapshot()) {
-      const current = loadShape(SHAPE_COUNT);
-      if (!whole || current !== to) resetToWhole(current);
-    }
+    else if (paused) showStill();
   });
 
   function showStill() {
@@ -450,7 +468,7 @@ function init(canvas) {
   window.addEventListener('blur', () => { hovering = false; });
 
   window.addEventListener('click', (e) => {
-    if (paused) return;
+    if (paused || forcedColors.matches) return;
     if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
     if (e.target instanceof Element && e.target.closest(IGNORE + ', .scene-controls')) return;
     const sel = window.getSelection();
@@ -476,13 +494,12 @@ function init(canvas) {
   }
   // In forced-colours mode (Windows High Contrast) site.css hides the scene; don't keep
   // rendering it out of sight.
-  const forcedColors = window.matchMedia('(forced-colors: active)');
   function start() {
     if (!raf && !paused && !document.hidden && !forcedColors.matches) { last = performance.now(); raf = requestAnimationFrame(frame); }
   }
   function stop() { cancelAnimationFrame(raf); raf = 0; }
   document.addEventListener('visibilitychange', () => (document.hidden ? stop() : start()));
-  forcedColors.addEventListener('change', () => (forcedColors.matches ? stop() : start()));
+  onMediaChange(forcedColors, () => (forcedColors.matches ? stop() : start()));
 
   // ---- Controls (layouts/_partials/scene_controls.html) ----
   // Shown only once the scene is running, so there is nothing to pause without WebGL or JS.
@@ -512,14 +529,9 @@ function init(canvas) {
     if (save) saveMotionPref(p);
   }
 
-  // WCAG 2.1.1 (Keyboard): the shatter isn't mouse-only; this button bursts the shape from its centre.
-  function shatterFromCentre() {
-    const c = v3.copy(group.position).project(camera);
-    shatter(((c.x + 1) / 2) * window.innerWidth, ((1 - c.y) / 2) * window.innerHeight);
-  }
-
   if (pauseBtn) pauseBtn.addEventListener('click', () => setPaused(!paused));
-  if (shatterBtn) shatterBtn.addEventListener('click', () => { if (!paused) shatterFromCentre(); });
+  // WCAG 2.1.1 (Keyboard): the shatter isn't mouse-only; this button bursts the shape from its centre.
+  if (shatterBtn) shatterBtn.addEventListener('click', () => { if (!paused) shatterFrom(0, 0, 0); });
 
   // Effect sliders (fx-panel.js). Changes apply live, and redraw the still frame when paused.
   let lastIdle = CFG.idle;
@@ -552,5 +564,16 @@ function init(canvas) {
   // so moving between pages never dips the shape's opacity.
   if (!firstSceneOfVisit()) canvas.style.transition = 'none';
   canvas.classList.add('is-ready'); // fades the canvas in (see site.css)
-  if (controls) controls.hidden = false;
+  if (controls) {
+    controls.hidden = false;
+    document.documentElement.classList.add('has-scene-controls'); // site.css reserves room for them
+  }
+}
+
+// MediaQueryList change listener, with the pre-2020 Safari API as a fallback: MediaQueryList
+// only became an EventTarget in Safari 14, and calling addEventListener there throws and stops
+// the scene from starting at all.
+function onMediaChange(mql, fn) {
+  if (mql.addEventListener) mql.addEventListener('change', fn);
+  else if (mql.addListener) mql.addListener(fn);
 }

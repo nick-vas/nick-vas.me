@@ -11,7 +11,12 @@
    The WebGL scene can put a shard of any colour behind any text, so text gets a solid
    "halo" in the page's own background colour. On the plain page it is invisible; over a
    shard it keeps every glyph edged in the colour its contrast was designed against.
-   (WCAG's Understanding 1.4.3 counts a halo like this as the text's background.) */
+   (WCAG's Understanding 1.4.3 counts a halo like this as the text's background.)
+   Hard offsets fill a 4px disc around each glyph, plus stacked identical blurs that make the
+   outer edge opaque (the duplicates are deliberate). 4px rather than 3px: with the shape centred
+   behind the home intro and list cards transparent, a 3px halo left shard pixels touching the
+   anti-aliased corners of small text (7 of 200 measured text runs on the home page; 0 with 4px).
+   Long-form post text doesn't use the halo at all (see below), which keeps the paint cost low. */
 :root {
     --halo: var(--theme);
 }
@@ -27,14 +32,22 @@
 
 body {
     text-shadow:
+        -4px -1px 0 var(--halo),
+        -4px 0px 0 var(--halo),
+        -4px 1px 0 var(--halo),
+        -3px -2px 0 var(--halo),
         -3px -1px 0 var(--halo),
         -3px 0px 0 var(--halo),
         -3px 1px 0 var(--halo),
+        -3px 2px 0 var(--halo),
+        -2px -3px 0 var(--halo),
         -2px -2px 0 var(--halo),
         -2px -1px 0 var(--halo),
         -2px 0px 0 var(--halo),
         -2px 1px 0 var(--halo),
         -2px 2px 0 var(--halo),
+        -2px 3px 0 var(--halo),
+        -1px -4px 0 var(--halo),
         -1px -3px 0 var(--halo),
         -1px -2px 0 var(--halo),
         -1px -1px 0 var(--halo),
@@ -42,12 +55,16 @@ body {
         -1px 1px 0 var(--halo),
         -1px 2px 0 var(--halo),
         -1px 3px 0 var(--halo),
+        -1px 4px 0 var(--halo),
+        0px -4px 0 var(--halo),
         0px -3px 0 var(--halo),
         0px -2px 0 var(--halo),
         0px -1px 0 var(--halo),
         0px 1px 0 var(--halo),
         0px 2px 0 var(--halo),
         0px 3px 0 var(--halo),
+        0px 4px 0 var(--halo),
+        1px -4px 0 var(--halo),
         1px -3px 0 var(--halo),
         1px -2px 0 var(--halo),
         1px -1px 0 var(--halo),
@@ -55,14 +72,22 @@ body {
         1px 1px 0 var(--halo),
         1px 2px 0 var(--halo),
         1px 3px 0 var(--halo),
+        1px 4px 0 var(--halo),
+        2px -3px 0 var(--halo),
         2px -2px 0 var(--halo),
         2px -1px 0 var(--halo),
         2px 0px 0 var(--halo),
         2px 1px 0 var(--halo),
         2px 2px 0 var(--halo),
+        2px 3px 0 var(--halo),
+        3px -2px 0 var(--halo),
         3px -1px 0 var(--halo),
         3px 0px 0 var(--halo),
         3px 1px 0 var(--halo),
+        3px 2px 0 var(--halo),
+        4px -1px 0 var(--halo),
+        4px 0px 0 var(--halo),
+        4px 1px 0 var(--halo),
         0 0 4px var(--halo),
         0 0 4px var(--halo),
         0 0 6px var(--halo);
@@ -77,18 +102,31 @@ body {
     margin-inline: -5px;
 }
 
-.first-entry .entry-header,
 .home-info .entry-content {
     padding: 5px;
     margin: -5px;
 }
 
+/* Card excerpts on list pages are transparent and clamped to 2 lines: widen the clip box on the
+   sides and top only, so the halo isn't cut off and no slice of a 3rd line shows. */
+.post-entry .entry-content {
+    padding: 5px 5px 0;
+    margin: -5px -5px 0;
+}
+
+/* The title is clamped to 3 lines: padding below it would reveal a slice of a 4th line. */
+.first-entry .entry-header {
+    padding: 5px 5px 0;
+    margin: -5px -5px 0;
+}
+
 /* Long-form text gets an opaque block in the page colour instead of a halo. Painting a halo
    around every glyph of a long post measured ~24x the raster work while scrolling; a
    background costs nothing and guarantees contrast. Shards pass behind these blocks (and show
-   in the gaps between them). Code blocks, rules and images keep their own look. Entry cards and
-   the previous/next links are the exception: they are transparent (part 4) and keep the halo. */
-.post-content > :is(p, h1, h2, h3, h4, h5, h6, ul, ol, dl, blockquote, table, details, figure) {
+   in the gaps between them). That covers every block in a post body, including footnotes and
+   shortcode output; code blocks and rules keep their own look. Entry cards and the
+   previous/next links are the exception: they are transparent (part 4) and keep the halo. */
+.post-content > :not(pre, .highlight, hr) {
     background: var(--halo);
 }
 
@@ -151,6 +189,15 @@ input, textarea, select, button, .scene-controls, .skip-link, mark, ::selection 
    (bottom-right, 64-104px up: bottom 4rem + height 2.5rem). */
 html {
     scroll-padding-bottom: 120px;
+}
+
+/* 2.4.11 at the very end of the page, where scroll-padding can't help: on narrow screens (and at
+   200% zoom) the footer would sit under the fixed controls and the go-to-top button, so reserve
+   room below it. The class is set by bg-scene.js once the controls are shown. */
+@media (max-width: 768px) {
+    .has-scene-controls body {
+        padding-bottom: 112px;
+    }
 }
 
 /* Anchored headings land clear of the sticky header. */
