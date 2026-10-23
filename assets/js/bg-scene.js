@@ -374,10 +374,14 @@ function init(canvas) {
   // while paused the scene's time stands still at the moment of pausing. Kept in localStorage
   // next to the pause choice, so every page and tab shows the same pose, paused or not. The
   // stored values are plain seconds (a pause can last days); the scene's time wraps every ~28 h.
-  const startTime = loadTime(clock());
-  let { offset: timeOffset, pausedAt, idleShift, hueShift } = startTime;
-  // The speeds idleShift/hueShift currently fit; applyFx re-phases them when the sliders differ.
-  let [lastIdle, lastDrift] = startTime.speeds || [CFG.idle, CFG.hueDrift];
+  // lastIdle/lastDrift: the speeds idleShift/hueShift currently fit; applyFx re-phases them when
+  // the sliders differ.
+  let timeOffset, pausedAt, idleShift, hueShift, lastIdle, lastDrift;
+  function adoptClock(time) {
+    ({ offset: timeOffset, pausedAt, idleShift, hueShift } = time);
+    [lastIdle, lastDrift] = time.speeds || [CFG.idle, CFG.hueDrift]; // unstamped: assume the sliders
+  }
+  adoptClock(loadTime(clock()));
   const saveClock = () => saveTime({ offset: timeOffset, pausedAt, idleShift, hueShift, speeds: [lastIdle, lastDrift] });
   const animTime = () => ((paused && pausedAt ? pausedAt : clock()) - timeOffset) % 100000;
   // The time the stored clock stands at (a stored pause moment counts even before this page applies
@@ -458,15 +462,14 @@ function init(canvas) {
 
   // The clock and the sliders, as the last page or tab to change them left them. The clock's
   // phase shifts fit the slider speeds stored with them; if the sliders have moved on since
-  // (another tab is between its two writes of a slider move), applyFx re-phases them here only:
-  // the tab that moved the slider is the one that saves, so tabs never write back and forth.
+  // (another tab is between its two writes of a slider move), applyFx re-phases them here in
+  // memory only. A re-phase is saved only by the tab that moved the slider, so a sync never
+  // triggers a write; this tab saves the clock again only when it pauses or resumes itself.
   function loadShared() {
     if (!storageAvailable()) return; // blocked storage: keep what this page has in memory
-    const time = loadTime(clock());
-    ({ offset: timeOffset, pausedAt, idleShift, hueShift } = time);
     Object.assign(CFG, FX_DEFAULTS);
     restoreFx(CFG);
-    [lastIdle, lastDrift] = time.speeds || [CFG.idle, CFG.hueDrift];
+    adoptClock(loadTime(clock()));
     refreshFxPanel();
     applyFx(false);
   }

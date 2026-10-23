@@ -38,11 +38,13 @@ export const saveShape = (i) => attempt(() => sessionStorage.setItem(SHAPE_KEY, 
 const NO_TIME = { offset: 0, pausedAt: 0, idleShift: 0, hueShift: 0 };
 export const loadTime = (now) => attempt(() => {
   const t = JSON.parse(localStorage.getItem(TIME_KEY)) || {};
-  const time = Object.fromEntries(Object.keys(NO_TIME).map((k) => [k, Number(t[k]) || 0]));
+  const finite = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+  const time = Object.fromEntries(Object.keys(NO_TIME).map((k) => [k, finite(t[k])]));
   // A pause moment must be in the past; anything else (corrupt, or a clock set back) is dropped.
   if (time.pausedAt < 0 || time.pausedAt > now + 60) time.pausedAt = 0;
   if (time.offset < 0) time.offset = 0;
-  time.speeds = Array.isArray(t.speeds) && t.speeds.length === 2 ? t.speeds.map(Number) : null;
+  const speeds = Array.isArray(t.speeds) ? t.speeds.map(Number) : [];
+  time.speeds = speeds.length === 2 && speeds.every(Number.isFinite) ? speeds : null;
   return time;
 }, { ...NO_TIME, speeds: null });
 export const saveTime = (time) => attempt(() => localStorage.setItem(TIME_KEY, JSON.stringify(time)));

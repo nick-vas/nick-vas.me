@@ -191,6 +191,7 @@ input, textarea, select, button, .scene-controls, .skip-link, mark, ::selection 
    (bottom-right, 64-104px up at the default font size: bottom 4rem + height 2.5rem, so it grows
    with the reader's font size). */
 html {
+    scroll-padding-bottom: 120px; /* engines without max() */
     scroll-padding-bottom: max(76px, calc(6.5rem + 16px));
 }
 
@@ -201,6 +202,7 @@ html {
    forced colours, where the go-to-top button still shows; print drops it (end of file). */
 @media (max-width: 900px) {
     .has-scene-controls body {
+        padding-bottom: 112px; /* engines without max() */
         padding-bottom: max(68px, calc(6.5rem + 8px));
     }
 
