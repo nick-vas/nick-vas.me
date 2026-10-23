@@ -31,13 +31,13 @@ export function restoreFx(cfg) {
   }
 }
 
-// Builds the panel. `defaults` is a copy of the config before any saved values; `onChange`
+// Builds the panel and returns a function that redraws the sliders from `cfg`. `defaults` is a copy of the config before any saved values; `onChange`
 // runs after every change so the scene can apply it.
 export function initFxPanel(cfg, defaults, onChange) {
   const toggle = document.getElementById('scene-fx-toggle');
   const panel = document.getElementById('scene-fx-panel');
   const list = document.getElementById('scene-fx-list');
-  if (!toggle || !panel || !list) return;
+  if (!toggle || !panel || !list) return () => {};
 
   const setOpen = (open) => {
     panel.hidden = !open;
@@ -70,11 +70,13 @@ export function initFxPanel(cfg, defaults, onChange) {
     list.append(row);
     return show;
   });
+  const refresh = () => rows.forEach((show) => show());
 
   document.getElementById('scene-fx-reset')?.addEventListener('click', () => {
     Object.assign(cfg, defaults);
-    rows.forEach((show) => show());
+    refresh();
     save();
     onChange();
   });
+  return refresh;
 }

@@ -4,7 +4,7 @@
 const MOTION_KEY = 'bg-motion'; // localStorage: 'paused' | 'playing'
 const SEEN_KEY = 'bg-seen'; // sessionStorage: the scene has already faded in this visit
 const SHAPE_KEY = 'bg-scene-shape'; // sessionStorage: index of the current shape
-const TIME_KEY = 'bg-scene-time'; // sessionStorage: { offset, pausedAt, idleShift, hueShift }
+const TIME_KEY = 'bg-motion-time'; // localStorage: { offset, pausedAt, idleShift, hueShift }, shared by all tabs
 const SNAPSHOT_KEY = 'bg-scene-snapshot'; // sessionStorage: shards mid-shatter
 const FX_KEY = 'bg-fx'; // localStorage: effect sliders that differ from the defaults
 
@@ -31,14 +31,29 @@ export const loadShape = (count) => attempt(() => {
 }, 0);
 export const saveShape = (i) => attempt(() => sessionStorage.setItem(SHAPE_KEY, String(i)));
 
-// offset/pausedAt: the scene's clock. idleShift/hueShift: phase corrections that keep the
-// rotation and colour from jumping when their speed sliders change (see applyFx).
+// offset/pausedAt: the scene's clock, in plain seconds. idleShift/hueShift: phase corrections that
+// keep the rotation and colour from jumping when their speed sliders change (see applyFx).
+// speeds: the [idle, hueDrift] slider values those shifts were worked out for, or null.
+// In localStorage beside the pause choice, so pausing shows the same pose in every tab.
 const NO_TIME = { offset: 0, pausedAt: 0, idleShift: 0, hueShift: 0 };
-export const loadTime = () => attempt(() => {
-  const t = JSON.parse(sessionStorage.getItem(TIME_KEY)) || {};
-  return Object.fromEntries(Object.keys(NO_TIME).map((k) => [k, Number(t[k]) || 0]));
-}, NO_TIME);
-export const saveTime = (time) => attempt(() => sessionStorage.setItem(TIME_KEY, JSON.stringify(time)));
+export const loadTime = (now) => attempt(() => {
+  const t = JSON.parse(localStorage.getItem(TIME_KEY)) || {};
+  const finite = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+  const time = Object.fromEntries(Object.keys(NO_TIME).map((k) => [k, finite(t[k])]));
+  // A pause moment must be in the past; anything else (corrupt, or a clock set back) is dropped.
+  if (time.pausedAt < 0 || time.pausedAt > now + 60) time.pausedAt = 0;
+  if (time.offset < 0) time.offset = 0;
+  const speeds = Array.isArray(t.speeds) ? t.speeds.map(Number) : [];
+  time.speeds = speeds.length === 2 && speeds.every(Number.isFinite) ? speeds : null;
+  return time;
+}, { ...NO_TIME, speeds: null });
+export const saveTime = (time) => attempt(() => localStorage.setItem(TIME_KEY, JSON.stringify(time)));
+// False when the browser refuses storage (blocked site data, some private modes).
+export const storageAvailable = () => attempt(() => !!localStorage, false);
+
+// Storage-event filter for the cross-tab sync: the pause choice, the clock and the sliders (the
+// clock's phase shifts only fit the slider speeds they were saved with, so they travel together).
+export const isSharedKey = (key) => key === MOTION_KEY || key === TIME_KEY || key === FX_KEY;
 
 // Shatter state handed to the next page. takeSnapshot reads and removes it in one go.
 export const takeSnapshot = () => attempt(() => {
