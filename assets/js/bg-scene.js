@@ -23,11 +23,11 @@ import {
   WebGLRenderer,
 } from './vendor/three.module.js';
 import { HEMI_BASE, SUN_BASE, createConfig } from './bg-scene/config.js';
-import { initFxPanel, restoreFx } from './bg-scene/fx-panel.js';
+import { initFxPanel, reloadFx, restoreFx } from './bg-scene/fx-panel.js';
 import { clamp, lerp, mulberry32, smoothstep } from './bg-scene/math.js';
 import { SHAPE_COUNT, makeShape } from './bg-scene/shards.js';
 import {
-  clearSnapshot, firstSceneOfVisit, fromBase64, isMotionKey, loadMotionPref, loadShape, loadTime,
+  clearSnapshot, firstSceneOfVisit, fromBase64, isSharedKey, loadMotionPref, loadShape, loadTime,
   saveMotionPref, saveShape, saveTime, storeSnapshot, takeSnapshot, toBase64,
 } from './bg-scene/storage.js';
 
@@ -198,6 +198,8 @@ function init(canvas) {
   const ndc = new Vector2();
   let hovering = false;
   const lean = new Vector2();
+  const leanStep = new Vector2();
+  const origin2 = new Vector2();
 
   function pointOnShapePlane(x, y, out) {
     ndc.set((x / window.innerWidth) * 2 - 1, -(y / window.innerHeight) * 2 + 1);
@@ -243,11 +245,13 @@ function init(canvas) {
   // ---- Simulation ----
   // WCAG 2.3.1 (Three Flashes). A tumbling shard swaps its rainbow face for the complementary one
   // up to twice per turn. Each shard's total rotation (spin plus the ease back to rest) is capped
-  // at one turn per second; with the whole shape's own slow turn (0.22 rad/s at the default idle
-  // speed) and the cursor tilt (at most 1.4 rad/s at the default follow speed) on top, a shard
-  // turns at most ~7.9 rad/s relative to the viewer: at most ~2.5 face swaps a second, under the
-  // limit of 3, however fast anyone clicks.
+  // at one turn per second, and the cursor tilt at 1.4 rad/s (see place()). With the whole
+  // shape's own turn (0.44 rad/s at the fastest idle setting) and its small wobble (~0.1 rad/s) on
+  // top, a shard turns at most ~8.2 rad/s relative to the viewer: at most ~2.6 face swaps a
+  // second, under the limit of 3, whatever the sliders say and however fast anyone clicks or
+  // moves the pointer.
   const MAX_SPIN = 2 * Math.PI; // rad/s
+  const MAX_LEAN = 1.4; // rad/s
   const SETTLE_DIST = 0.002; // shape radii (sum of |dx|+|dy|+|dz|)
   const SETTLE_SPEED = 0.01;
   // Soft walls just outside the viewport: a shard's centre may go a little past the edge (so a
@@ -376,8 +380,12 @@ function init(canvas) {
 
   function place(t, dt) {
     // The shape leans gently toward the pointer. It never lights up or swells on hover.
-    if (hovering) lean.lerp(ndc, Math.min(1, dt * CFG.followSpeed));
-    else lean.multiplyScalar(1 - Math.min(1, dt * CFG.followSpeed));
+    // It eases toward the pointer, but never turns faster than MAX_LEAN (a fast flick across the
+    // window would otherwise tilt it several radians a second).
+    leanStep.copy(hovering ? ndc : origin2).sub(lean).multiplyScalar(Math.min(1, dt * CFG.followSpeed));
+    const tilt = (Math.abs(leanStep.x) + Math.abs(leanStep.y)) * CFG.hoverLean;
+    if (tilt > MAX_LEAN * dt) leanStep.multiplyScalar((MAX_LEAN * dt) / tilt);
+    lean.add(leanStep);
     group.position.set(Math.cos(t * 0.31) * 0.12, Math.sin(t * 0.6) * 0.22, 0);
     group.rotation.set(
       Math.sin(t * 0.23) * 0.35 - lean.y * CFG.hoverLean,
@@ -428,9 +436,9 @@ function init(canvas) {
   // page we just left was doing instead.
   window.addEventListener('pageshow', (e) => {
     if (!e.persisted) return;
-    // Other pages may have paused/resumed the animation, moved the time offset or advanced the
-    // shape while this one sat in the cache; pick all of that up.
-    ({ offset: timeOffset, pausedAt, idleShift, hueShift } = loadTime(clock()));
+    // Other pages may have paused/resumed the animation, moved the time offset, changed the
+    // sliders or advanced the shape while this one sat in the cache; pick all of that up.
+    loadShared();
     const nextPaused = loadMotionPref() ?? paused;
     // A paused page shows the current shape whole; a playing one resumes a carried-over shatter.
     if (nextPaused || !restoreSnapshot()) {
@@ -441,13 +449,29 @@ function init(canvas) {
     setPaused(nextPaused, false); // draws the still frame once if paused, else resumes the loop
   });
 
-  // Pausing or resuming in another tab applies here too (storage events fire in the other tabs).
-  window.addEventListener('storage', (e) => {
-    if (!isMotionKey(e.key)) return;
+  // The clock and the sliders, as the last page or tab to change them left them. The clock's
+  // phase shifts only fit the slider speeds they were saved with, so both are always taken together.
+  function loadShared() {
     ({ offset: timeOffset, pausedAt, idleShift, hueShift } = loadTime(clock()));
-    const pref = loadMotionPref();
-    if (pref !== null && pref !== paused) setPaused(pref, false);
-    else if (paused) showStill();
+    reloadFx(CFG, FX_DEFAULTS);
+    lastIdle = CFG.idle; // the loaded shifts already account for these speeds
+    lastDrift = CFG.hueDrift;
+    refreshFxPanel();
+    applyFx();
+  }
+
+  // Pausing, resuming or moving a slider in another tab applies here too (storage events fire in
+  // the other tabs). One slider move writes two keys; waiting a frame takes them in one go, so a
+  // half-updated pose is never drawn.
+  let syncFrame = 0;
+  window.addEventListener('storage', (e) => {
+    if (!isSharedKey(e.key) || syncFrame) return;
+    syncFrame = requestAnimationFrame(() => {
+      syncFrame = 0;
+      const pref = loadMotionPref();
+      loadShared(); // redraws the still frame if paused
+      if (pref !== null && pref !== paused) setPaused(pref, false);
+    });
   });
 
   function showStill() {
@@ -499,7 +523,7 @@ function init(canvas) {
   }
   function stop() { cancelAnimationFrame(raf); raf = 0; }
   document.addEventListener('visibilitychange', () => (document.hidden ? stop() : start()));
-  onMediaChange(forcedColors, () => (forcedColors.matches ? stop() : start()));
+  forcedColors.addEventListener('change', () => (forcedColors.matches ? stop() : start()));
 
   // ---- Controls (layouts/_partials/scene_controls.html) ----
   // Shown only once the scene is running, so there is nothing to pause without WebGL or JS.
@@ -552,7 +576,7 @@ function init(canvas) {
     sun.intensity = SUN_BASE * CFG.light;
     if (paused) showStill();
   }
-  initFxPanel(CFG, FX_DEFAULTS, applyFx);
+  const refreshFxPanel = initFxPanel(CFG, FX_DEFAULTS, applyFx);
   applyFx();
 
   // The wall test in step() needs the shape's real position and scale, so place it first.
@@ -568,12 +592,4 @@ function init(canvas) {
     controls.hidden = false;
     document.documentElement.classList.add('has-scene-controls'); // site.css reserves room for them
   }
-}
-
-// MediaQueryList change listener, with the pre-2020 Safari API as a fallback: MediaQueryList
-// only became an EventTarget in Safari 14, and calling addEventListener there throws and stops
-// the scene from starting at all.
-function onMediaChange(mql, fn) {
-  if (mql.addEventListener) mql.addEventListener('change', fn);
-  else if (mql.addListener) mql.addListener(fn);
 }

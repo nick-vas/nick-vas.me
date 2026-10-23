@@ -110,6 +110,28 @@ test.describe('animation controls', () => {
     expect(await opacity()).toBe('1');
   });
 
+  test('pause and slider changes reach other open tabs without moving the shape', async ({ context, page }) => {
+    await open(page, '/');
+    test.skip((await page.locator('#bg-scene').count()) === 0, 'no WebGL in this browser');
+    const other = await context.newPage();
+    const errors = await open(other, '/posts/');
+    await page.locator('#scene-pause').click();
+    await expect(other.locator('#scene-pause')).toHaveAttribute('aria-pressed', 'true');
+    const before = await other.locator('#bg-scene').screenshot();
+    // A speed change re-phases the rotation so the paused pose stays put, in every tab.
+    await page.evaluate(() => {
+      const r = document.getElementById('fx-idle');
+      r.value = 1.5;
+      r.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await expect(other.locator('#fx-idle')).toHaveValue('1.5');
+    const after = await other.locator('#bg-scene').screenshot();
+    expect(after.equals(before), 'paused pose in the other tab after a slider change').toBe(true);
+    await other.locator('#scene-pause').click();
+    await expect(page.locator('#scene-pause')).toHaveAttribute('aria-pressed', 'false');
+    expect(errors).toEqual([]);
+  });
+
   test('stress: rapid clicks and slider changes cause no errors', async ({ page }) => {
     const errors = await open(page, '/');
     test.skip((await page.locator('#bg-scene').count()) === 0, 'no WebGL in this browser');

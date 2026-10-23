@@ -44,8 +44,9 @@ export const loadTime = (now) => attempt(() => {
   return time;
 }, NO_TIME);
 export const saveTime = (time) => attempt(() => localStorage.setItem(TIME_KEY, JSON.stringify(time)));
-// Storage-event filter for the cross-tab pause sync.
-export const isMotionKey = (key) => key === MOTION_KEY || key === TIME_KEY;
+// Storage-event filter for the cross-tab sync: the pause choice, the clock and the sliders (the
+// clock's phase shifts only fit the slider speeds they were saved with, so they travel together).
+export const isSharedKey = (key) => key === MOTION_KEY || key === TIME_KEY || key === FX_KEY;
 
 // Shatter state handed to the next page. takeSnapshot reads and removes it in one go.
 export const takeSnapshot = () => attempt(() => {

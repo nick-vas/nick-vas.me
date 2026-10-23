@@ -111,7 +111,7 @@ body {
    sides and top only, so the halo isn't cut off and no slice of a 3rd line shows. */
 .post-entry .entry-content {
     padding: 5px 5px 0;
-    margin: -5px -5px 0;
+    margin: 3px -5px 8px; /* PaperMod's 8px above and below, less the padding */
 }
 
 /* The title is clamped to 3 lines: padding below it would reveal a slice of a 4th line. */
@@ -193,10 +193,16 @@ html {
 
 /* 2.4.11 at the very end of the page, where scroll-padding can't help: on narrow screens (and at
    200% zoom) the footer would sit under the fixed controls and the go-to-top button, so reserve
-   room below it. The class is set by bg-scene.js once the controls are shown. */
+   room below it. The class is set by bg-scene.js once the controls are shown. PaperMod lifts the
+   go-to-top button another 5rem on list pages at this width; keep it at its usual height, inside
+   the reserved room. Forced colours and print hide the controls and drop the room (end of file). */
 @media (max-width: 768px) {
     .has-scene-controls body {
         padding-bottom: 112px;
+    }
+
+    .has-scene-controls .list .top-link {
+        transform: none;
     }
 }
 
@@ -507,6 +513,10 @@ html {
     body::before {
         display: none;
     }
+
+    .has-scene-controls body {
+        padding-bottom: 0;
+    }
 }
 
 @media print {
@@ -516,6 +526,10 @@ html {
 
     #bg-scene, .scene-controls, .skip-link, body::before {
         display: none !important;
+    }
+
+    .has-scene-controls body {
+        padding-bottom: 0;
     }
 
     :is(.post-entry, .archive-entry) {
