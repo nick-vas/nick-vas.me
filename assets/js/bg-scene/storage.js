@@ -33,16 +33,18 @@ export const saveShape = (i) => attempt(() => sessionStorage.setItem(SHAPE_KEY, 
 
 // offset/pausedAt: the scene's clock, in plain seconds. idleShift/hueShift: phase corrections that
 // keep the rotation and colour from jumping when their speed sliders change (see applyFx).
+// speeds: the [idle, hueDrift] slider values those shifts were worked out for, or null.
 // In localStorage beside the pause choice, so pausing shows the same pose in every tab.
 const NO_TIME = { offset: 0, pausedAt: 0, idleShift: 0, hueShift: 0 };
 export const loadTime = (now) => attempt(() => {
   const t = JSON.parse(localStorage.getItem(TIME_KEY)) || {};
   const time = Object.fromEntries(Object.keys(NO_TIME).map((k) => [k, Number(t[k]) || 0]));
-  // A pause moment must be a real past time; anything else (corrupt, or a skewed clock) is dropped.
-  if (time.pausedAt && !(time.pausedAt > 1e9 && time.pausedAt <= now + 60)) time.pausedAt = 0;
+  // A pause moment must be in the past; anything else (corrupt, or a clock set back) is dropped.
+  if (time.pausedAt < 0 || time.pausedAt > now + 60) time.pausedAt = 0;
   if (time.offset < 0) time.offset = 0;
+  time.speeds = Array.isArray(t.speeds) && t.speeds.length === 2 ? t.speeds.map(Number) : null;
   return time;
-}, NO_TIME);
+}, { ...NO_TIME, speeds: null });
 export const saveTime = (time) => attempt(() => localStorage.setItem(TIME_KEY, JSON.stringify(time)));
 // Storage-event filter for the cross-tab sync: the pause choice, the clock and the sliders (the
 // clock's phase shifts only fit the slider speeds they were saved with, so they travel together).

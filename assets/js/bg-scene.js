@@ -375,7 +375,7 @@ function init(canvas) {
   // next to the pause choice, so every page and tab shows the same pose, paused or not. The
   // stored values are plain seconds (a pause can last days); the scene's time wraps every ~28 h.
   let { offset: timeOffset, pausedAt, idleShift, hueShift } = loadTime(clock());
-  const saveClock = () => saveTime({ offset: timeOffset, pausedAt, idleShift, hueShift });
+  const saveClock = () => saveTime({ offset: timeOffset, pausedAt, idleShift, hueShift, speeds: [CFG.idle, CFG.hueDrift] });
   const animTime = () => ((paused && pausedAt ? pausedAt : clock()) - timeOffset) % 100000;
 
   function place(t, dt) {
@@ -450,10 +450,16 @@ function init(canvas) {
   });
 
   // The clock and the sliders, as the last page or tab to change them left them. The clock's
-  // phase shifts only fit the slider speeds they were saved with, so both are always taken together.
+  // phase shifts only fit the slider speeds they were saved with, so both are taken together, and
+  // not at all while another tab is halfway through writing them (one slider move writes the
+  // sliders, then the clock; the second write's storage event brings this back).
   function loadShared() {
-    ({ offset: timeOffset, pausedAt, idleShift, hueShift } = loadTime(clock()));
-    reloadFx(CFG, FX_DEFAULTS);
+    const time = loadTime(clock());
+    const fx = { ...CFG };
+    reloadFx(fx, FX_DEFAULTS);
+    if (time.speeds && (time.speeds[0] !== fx.idle || time.speeds[1] !== fx.hueDrift)) return;
+    ({ offset: timeOffset, pausedAt, idleShift, hueShift } = time);
+    Object.assign(CFG, fx);
     lastIdle = CFG.idle; // the loaded shifts already account for these speeds
     lastDrift = CFG.hueDrift;
     refreshFxPanel();
@@ -461,8 +467,7 @@ function init(canvas) {
   }
 
   // Pausing, resuming or moving a slider in another tab applies here too (storage events fire in
-  // the other tabs). One slider move writes two keys; waiting a frame takes them in one go, so a
-  // half-updated pose is never drawn.
+  // the other tabs; several in a row are taken once, on the next frame).
   let syncFrame = 0;
   window.addEventListener('storage', (e) => {
     if (!isSharedKey(e.key) || syncFrame) return;

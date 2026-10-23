@@ -186,21 +186,25 @@ input, textarea, select, button, .scene-controls, .skip-link, mark, ::selection 
 
 /* 2.4.11 Focus Not Obscured: when keyboard focus scrolls the page, keep the focused element
    clear of the fixed controls (bottom-left, up to 60px) and PaperMod's go-to-top button
-   (bottom-right, 64-104px up: bottom 4rem + height 2.5rem). */
+   (bottom-right, 64-104px up at the default font size: bottom 4rem + height 2.5rem, so it grows
+   with the reader's font size). */
 html {
-    scroll-padding-bottom: 120px;
+    scroll-padding-bottom: max(76px, calc(6.5rem + 16px));
 }
 
 /* 2.4.11 at the very end of the page, where scroll-padding can't help: on narrow screens (and at
    200% zoom) the footer would sit under the fixed controls and the go-to-top button, so reserve
-   room below it. The class is set by bg-scene.js once the controls are shown. PaperMod lifts the
-   go-to-top button another 5rem on list pages at this width; keep it at its usual height, inside
-   the reserved room. Forced colours and print hide the controls and drop the room (end of file). */
+   room below it (112px at the default font size). The class is set by bg-scene.js once the
+   controls are shown. Forced colours and print hide the controls and drop the room (end of file). */
 @media (max-width: 768px) {
     .has-scene-controls body {
-        padding-bottom: 112px;
+        padding-bottom: max(68px, calc(6.5rem + 8px));
     }
+}
 
+/* PaperMod lifts the go-to-top button another 5rem on list pages up to 900px wide, above the
+   scroll padding and the footer room; keep it at its usual height. */
+@media (max-width: 900px) {
     .has-scene-controls .list .top-link {
         transform: none;
     }

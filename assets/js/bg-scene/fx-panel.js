@@ -33,7 +33,7 @@ export function restoreFx(cfg) {
 
 // Puts `cfg` back to the defaults plus whatever is remembered now (another tab may have changed it).
 export function reloadFx(cfg, defaults) {
-  for (const [key] of FX) cfg[key] = defaults[key];
+  Object.assign(cfg, defaults);
   restoreFx(cfg);
 }
 
@@ -76,12 +76,13 @@ export function initFxPanel(cfg, defaults, onChange) {
     list.append(row);
     return show;
   });
+  const refresh = () => rows.forEach((show) => show());
 
   document.getElementById('scene-fx-reset')?.addEventListener('click', () => {
     Object.assign(cfg, defaults);
-    rows.forEach((show) => show());
+    refresh();
     save();
     onChange();
   });
-  return () => rows.forEach((show) => show());
+  return refresh;
 }
