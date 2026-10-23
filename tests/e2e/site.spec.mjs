@@ -130,6 +130,8 @@ test.describe('animation controls', () => {
       r.dispatchEvent(new Event('input', { bubbles: true }));
     });
     await expect(other.locator('#fx-idle')).toHaveValue('1.5');
+    // Redraw the paused frame from the synced state (a resize redraws it at the same size).
+    await other.evaluate(() => window.dispatchEvent(new Event('resize')));
     const after = await other.locator('#bg-scene').screenshot();
     expect(after.equals(before), 'paused pose in the other tab after a slider change').toBe(true);
     await canvasOnly.evaluate((el) => el.remove());

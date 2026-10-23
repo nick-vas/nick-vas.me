@@ -114,10 +114,12 @@ body {
     margin: 3px -5px 8px; /* PaperMod's 8px above and below, less the padding */
 }
 
-/* The title is clamped to 3 lines: padding below it would reveal a slice of a 4th line. */
+/* The title is clamped to 3 lines. 3px below it is the most that shows no slice of a 4th line
+   (its glyphs start ~3.3px below the clamp edge) and, with the line's own space under the
+   descenders, still leaves room for the 4px halo. */
 .first-entry .entry-header {
-    padding: 5px 5px 0;
-    margin: -5px -5px 0;
+    padding: 5px 5px 3px;
+    margin: -5px -5px -3px;
 }
 
 /* Long-form text gets an opaque block in the page colour instead of a halo. Painting a halo

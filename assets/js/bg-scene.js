@@ -28,7 +28,7 @@ import { clamp, lerp, mulberry32, smoothstep } from './bg-scene/math.js';
 import { SHAPE_COUNT, makeShape } from './bg-scene/shards.js';
 import {
   clearSnapshot, firstSceneOfVisit, fromBase64, isSharedKey, loadMotionPref, loadShape, loadTime,
-  saveMotionPref, saveShape, saveTime, storeSnapshot, takeSnapshot, toBase64,
+  saveMotionPref, saveShape, saveTime, storageAvailable, storeSnapshot, takeSnapshot, toBase64,
 } from './bg-scene/storage.js';
 
 const canvas = document.getElementById('bg-scene');
@@ -197,8 +197,8 @@ function init(canvas) {
   const raycaster = new Raycaster();
   const ndc = new Vector2();
   let hovering = false;
-  const lean = new Vector2();
-  const leanStep = new Vector2();
+  const tilt = new Vector2(); // the angles the shape is tilted toward the pointer, in radians
+  const tiltStep = new Vector2();
   const origin2 = new Vector2();
 
   function pointOnShapePlane(x, y, out) {
@@ -386,16 +386,17 @@ function init(canvas) {
 
   function place(t, dt) {
     // The shape leans gently toward the pointer. It never lights up or swells on hover.
-    // It eases toward the pointer, but never turns faster than MAX_LEAN (a fast flick across the
-    // window would otherwise tilt it several radians a second).
-    leanStep.copy(hovering ? ndc : origin2).sub(lean).multiplyScalar(Math.min(1, dt * CFG.followSpeed));
-    const tilt = (Math.abs(leanStep.x) + Math.abs(leanStep.y)) * CFG.hoverLean;
-    if (tilt > MAX_LEAN * dt) leanStep.multiplyScalar((MAX_LEAN * dt) / tilt);
-    lean.add(leanStep);
+    // It eases toward the pointer, but never turns faster than MAX_LEAN: not on a fast flick across
+    // the window, and not when the Hover tilt slider changes under a resting pointer.
+    tiltStep.copy(hovering ? ndc : origin2).multiplyScalar(CFG.hoverLean).sub(tilt)
+      .multiplyScalar(Math.min(1, dt * CFG.followSpeed));
+    const turn = Math.abs(tiltStep.x) + Math.abs(tiltStep.y);
+    if (turn > MAX_LEAN * dt) tiltStep.multiplyScalar((MAX_LEAN * dt) / turn);
+    tilt.add(tiltStep);
     group.position.set(Math.cos(t * 0.31) * 0.12, Math.sin(t * 0.6) * 0.22, 0);
     group.rotation.set(
-      Math.sin(t * 0.23) * 0.35 - lean.y * CFG.hoverLean,
-      t * 0.22 * CFG.idle + idleShift + lean.x * CFG.hoverLean,
+      Math.sin(t * 0.23) * 0.35 - tilt.y,
+      t * 0.22 * CFG.idle + idleShift + tilt.x,
       Math.sin(t * 0.17) * 0.12,
     );
     group.scale.setScalar(radius * CFG.size);
@@ -457,15 +458,17 @@ function init(canvas) {
 
   // The clock and the sliders, as the last page or tab to change them left them. The clock's
   // phase shifts fit the slider speeds stored with them; if the sliders have moved on since
-  // (another tab is between its two writes of a slider move), applyFx re-phases them.
+  // (another tab is between its two writes of a slider move), applyFx re-phases them here only:
+  // the tab that moved the slider is the one that saves, so tabs never write back and forth.
   function loadShared() {
+    if (!storageAvailable()) return; // blocked storage: keep what this page has in memory
     const time = loadTime(clock());
     ({ offset: timeOffset, pausedAt, idleShift, hueShift } = time);
     Object.assign(CFG, FX_DEFAULTS);
     restoreFx(CFG);
     [lastIdle, lastDrift] = time.speeds || [CFG.idle, CFG.hueDrift];
     refreshFxPanel();
-    applyFx();
+    applyFx(false);
   }
 
   // Pausing, resuming or moving a slider in another tab applies here too (storage events fire in
@@ -546,7 +549,7 @@ function init(canvas) {
       // Drop the cursor lean too, so the paused pose depends only on time and is the
       // same on every page (otherwise it would jump on the next page load).
       hovering = false;
-      lean.set(0, 0);
+      tilt.set(0, 0);
       showStill();
     } else {
       if (pausedAt) timeOffset += clock() - pausedAt;
@@ -567,7 +570,7 @@ function init(canvas) {
   if (shatterBtn) shatterBtn.addEventListener('click', () => { if (!paused) shatterFrom(0, 0, 0); });
 
   // Effect sliders (fx-panel.js). Changes apply live, and redraw the still frame when paused.
-  function applyFx() {
+  function applyFx(persist = true) {
     // Rotation and colour are speed x absolute time, so changing a speed would make them jump
     // by (time x change). Shift their phase by the opposite amount to keep them where they are.
     const t = clockTime();
@@ -576,15 +579,15 @@ function init(canvas) {
       hueShift = (hueShift + t * (lastDrift - CFG.hueDrift)) % 1;
       lastIdle = CFG.idle;
       lastDrift = CFG.hueDrift;
-      saveClock();
+      if (persist) saveClock();
     }
     frontMaterial.opacity = backMaterial.opacity = CFG.opacity;
     hemi.intensity = HEMI_BASE * CFG.light;
     sun.intensity = SUN_BASE * CFG.light;
     if (paused) showStill();
   }
-  const refreshFxPanel = initFxPanel(CFG, FX_DEFAULTS, applyFx);
-  applyFx();
+  const refreshFxPanel = initFxPanel(CFG, FX_DEFAULTS, () => applyFx());
+  applyFx(false);
 
   // The wall test in step() needs the shape's real position and scale, so place it first.
   place(animTime(), 0);
