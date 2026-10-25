@@ -14,9 +14,10 @@
    (WCAG's Understanding 1.4.3 counts a halo like this as the text's background.)
    Hard offsets fill a 4px disc around each glyph, plus stacked identical blurs that make the
    outer edge opaque (the duplicates are deliberate). 4px rather than 3px: with the shape centred
-   behind the home intro and list cards transparent, a 3px halo left shard pixels touching the
-   anti-aliased corners of small text (7 of 200 measured text runs on the home page; 0 with 4px).
-   Long-form post text doesn't use the halo at all (see below), which keeps the paint cost low. */
+   behind the home intro, a 3px halo left shard pixels touching the anti-aliased corners of small
+   text (7 of 200 measured text runs on the home page; 0 with 4px). Post text, entry cards and
+   the previous/next links don't use the halo at all: they sit on the page colour instead (see
+   below and part 4), which keeps the paint cost low. */
 :root {
     --halo: var(--theme);
 }
@@ -107,13 +108,6 @@ body {
     margin: -5px;
 }
 
-/* Card excerpts on list pages are transparent and clamped to 2 lines: widen the clip box on the
-   sides and top only, so the halo isn't cut off and no slice of a 3rd line shows. */
-.post-entry .entry-content {
-    padding: 5px 5px 0;
-    margin: 3px -5px 8px; /* PaperMod's 8px above and below, less the padding */
-}
-
 /* The title is clamped to 3 lines. 3px below it is the most that shows no slice of a 4th line
    (its glyphs start ~3.3px below the clamp edge) and, with the line's own space under the
    descenders, still leaves room for the 4px halo. */
@@ -127,7 +121,7 @@ body {
    background costs nothing and guarantees contrast. Shards pass behind these blocks (and show
    in the gaps between them). That covers every block in a post body, including footnotes and
    shortcode output; code blocks and rules keep their own look. Entry cards and the
-   previous/next links are the exception: they are transparent (part 4) and keep the halo. */
+   previous/next links are filled the same way (part 4). */
 .post-content > :not(pre, .highlight, hr) {
     background: var(--halo);
 }
@@ -404,13 +398,13 @@ html {
 }
 
 /* Entry cards on the home page, posts page, tag pages and archive, and the previous/next links:
-   transparent, with the card grey (#2e2e33 in dark mode) kept as a 1px outline. The animated
-   background can show through, so their text keeps the halo from part 1 (inherited from body)
-   instead of relying on an opaque fill. */
+   filled with the page colour, with the card grey (#2e2e33 in dark mode) kept as a 1px outline.
+   Shards pass behind them, so their text needs no halo: painting the halo on every card measured
+   ~20x the scroll raster work of a long archive (~257 ms vs ~12 ms for 106 posts). */
 :is(.post-entry, .archive-entry, .paginav) {
-    background: transparent;
+    background: var(--halo);
     border: 1px solid var(--entry-line);
-    text-shadow: inherit;
+    text-shadow: none;
 }
 
 :is(.post-entry, .archive-entry) {
