@@ -110,6 +110,37 @@ test.describe('animation controls', () => {
     expect(await opacity()).toBe('1');
   });
 
+  test('pause and slider changes reach other open tabs without moving the shape', async ({ context, page }) => {
+    const errors = await open(page, '/');
+    test.skip((await page.locator('#bg-scene').count()) === 0, 'no WebGL in this browser');
+    const other = await context.newPage();
+    const otherErrors = await open(other, '/posts/');
+    // A new tab fades its canvas in (0.3s); compare frames only once it is fully shown.
+    await expect.poll(() => other.evaluate(() => getComputedStyle(document.getElementById('bg-scene')).opacity)).toBe('1');
+    // Screenshots cover the canvas only: the page's own CSS animations (e.g. the drifting rule)
+    // would otherwise change the frame.
+    const canvasOnly = await other.addStyleTag({ content: 'body > :not(#bg-scene) { visibility: hidden !important; }' });
+    await page.locator('#scene-pause').click();
+    await expect(other.locator('#scene-pause')).toHaveAttribute('aria-pressed', 'true');
+    const before = await other.locator('#bg-scene').screenshot();
+    // A speed change re-phases the rotation so the paused pose stays put, in every tab.
+    await page.evaluate(() => {
+      const r = document.getElementById('fx-idle');
+      r.value = 1.5;
+      r.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await expect(other.locator('#fx-idle')).toHaveValue('1.5');
+    // Redraw the paused frame from the synced state (a resize redraws it at the same size).
+    await other.evaluate(() => window.dispatchEvent(new Event('resize')));
+    const after = await other.locator('#bg-scene').screenshot();
+    expect(after.equals(before), 'paused pose in the other tab after a slider change').toBe(true);
+    await canvasOnly.evaluate((el) => el.remove());
+    await other.locator('#scene-pause').click();
+    await expect(page.locator('#scene-pause')).toHaveAttribute('aria-pressed', 'false');
+    expect(errors).toEqual([]);
+    expect(otherErrors).toEqual([]);
+  });
+
   test('stress: rapid clicks and slider changes cause no errors', async ({ page }) => {
     const errors = await open(page, '/');
     test.skip((await page.locator('#bg-scene').count()) === 0, 'no WebGL in this browser');

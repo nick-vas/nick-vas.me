@@ -1,8 +1,7 @@
 // The gear panel (layouts/_partials/scene_controls.html): one slider per effect setting.
-// Changes apply live, are remembered, and keep the spin cap in the simulation (WCAG 2.3.1)
-// whatever is chosen here.
+// Changes apply live, are remembered (bg-scene.js saves them with the rest of the shared state),
+// and keep the spin cap in the simulation (WCAG 2.3.1) whatever is chosen here.
 import { clamp } from './math.js';
-import { loadFx, saveFx } from './storage.js';
 
 // [key in the config, label, min, max, step]
 export const FX = [
@@ -22,22 +21,26 @@ export const FX = [
   ['hueDrift', 'Colour drift', 0, 0.1, 0.005],
 ];
 
-// Puts the remembered slider values into `cfg`, ignoring anything out of range.
-export function restoreFx(cfg) {
-  const saved = loadFx();
+// Puts remembered slider values (`saved`, as from changedFx) into `cfg`, ignoring anything out of range.
+export function restoreFx(cfg, saved) {
   for (const [key, , min, max] of FX) {
     const v = Number(saved[key]);
     if (key in saved && Number.isFinite(v)) cfg[key] = clamp(v, min, max);
   }
 }
 
-// Builds the panel. `defaults` is a copy of the config before any saved values; `onChange`
-// runs after every change so the scene can apply it.
+// The sliders that differ from `defaults`, the form they are remembered in.
+export const changedFx = (cfg, defaults) =>
+  Object.fromEntries(FX.filter(([k]) => cfg[k] !== defaults[k]).map(([k]) => [k, cfg[k]]));
+
+// Builds the panel and returns a function that redraws the sliders from `cfg`. `defaults` is a
+// copy of the config before any saved values; `onChange` runs after every change so the scene
+// can apply and remember it.
 export function initFxPanel(cfg, defaults, onChange) {
   const toggle = document.getElementById('scene-fx-toggle');
   const panel = document.getElementById('scene-fx-panel');
   const list = document.getElementById('scene-fx-list');
-  if (!toggle || !panel || !list) return;
+  if (!toggle || !panel || !list) return () => {};
 
   const setOpen = (open) => {
     panel.hidden = !open;
@@ -50,7 +53,6 @@ export function initFxPanel(cfg, defaults, onChange) {
     if (e.key === 'Escape' && !panel.hidden) { setOpen(false); toggle.focus(); }
   });
 
-  const save = () => saveFx(Object.fromEntries(FX.filter(([k]) => cfg[k] !== defaults[k]).map(([k]) => [k, cfg[k]])));
   const rows = FX.map(([key, label, min, max, step]) => {
     const id = 'fx-' + key;
     const row = document.createElement('div');
@@ -62,7 +64,6 @@ export function initFxPanel(cfg, defaults, onChange) {
     input.addEventListener('input', () => {
       cfg[key] = Number(input.value);
       show();
-      save();
       onChange();
     });
     show();
@@ -70,11 +71,12 @@ export function initFxPanel(cfg, defaults, onChange) {
     list.append(row);
     return show;
   });
+  const refresh = () => rows.forEach((show) => show());
 
   document.getElementById('scene-fx-reset')?.addEventListener('click', () => {
     Object.assign(cfg, defaults);
-    rows.forEach((show) => show());
-    save();
+    refresh();
     onChange();
   });
+  return refresh;
 }

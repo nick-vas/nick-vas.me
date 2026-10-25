@@ -47,7 +47,14 @@
                 // The scene reads its motion setting once at start-up: forget the saved
                 // pause choice and reload so the new setting takes effect.
                 if (cls === 'sim-rm') {
-                    try { localStorage.removeItem('bg-motion'); } catch (e) { }
+                    try {
+                        var state = JSON.parse(localStorage.getItem('bg-scene-state'));
+                        if (state) {
+                            delete state.paused;
+                            localStorage.setItem('bg-scene-state', JSON.stringify(state));
+                        }
+                        localStorage.removeItem('bg-motion'); // earlier versions
+                    } catch (e) { }
                     location.reload();
                 }
             });

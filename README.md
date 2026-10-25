@@ -149,7 +149,9 @@ same opacity on every page, and carries over as you move between pages.
   `wallStiffness`).
 - The gear button opens sliders for the main effect settings (shatter speed, regather time,
   hover tilt and follow speed, size, opacity, brightness, colours, ...). They apply live, are
-  remembered in `localStorage`, and have a reset button. The list is `FX` in
+  remembered, and have a reset button. They're stored with the pause choice and the scene's
+  clock as one `localStorage` record (`bg-scene-state`), written whole on every change, so every
+  open tab picks up the same state in one step. The list is `FX` in
   `assets/js/bg-scene/fx-panel.js`; defaults are in `assets/js/bg-scene/config.js`.
 - The code is split into modules under `assets/js/bg-scene/`: `config` (settings),
   `shards` (the shapes and their cutting), `storage` (everything remembered between
@@ -187,13 +189,13 @@ cover what the theme doesn't, mainly around the animated background.
 
 | WCAG | What | Where |
 | --- | --- | --- |
-| 2.2.2 Pause, Stop, Hide | Pause button for the background animation, remembered across pages; the paused pose is identical on every page. The animation plays by default, including when the OS "reduce motion" setting is on. Nothing animates in Windows High Contrast. | `layouts/_partials/scene_controls.html`, `assets/js/bg-scene.js` |
+| 2.2.2 Pause, Stop, Hide | Pause button for the background animation, remembered across pages and applied to other open tabs, which all stop at the same moment of the animation (and pick up slider changes made in any of them). The animation plays by default, including when the OS "reduce motion" setting is on. Nothing animates in Windows High Contrast. | `layouts/_partials/scene_controls.html`, `assets/js/bg-scene.js` |
 | 2.1.1 Keyboard | The shatter is also a button, so it isn't mouse-only. Code blocks and tables that scroll sideways take keyboard focus (and task-list checkboxes get names) via `assets/js/a11y-content.js`. | same |
-| 2.3.1 Three Flashes | Shard spin is capped at one turn per second, so a shard swaps its rainbow face for the complementary one at most twice a second, however fast someone clicks. | `bg-scene.js` (`MAX_SPIN`) |
-| 1.4.3 Contrast | Shards passing behind text never reduce its contrast. Short text (header, home intro, titles, footer) gets a halo in the page's own background colour; long-form text (post bodies) sits on blocks of the page colour instead, which costs nothing to paint (a halo on every glyph of a long post measured ~20x the scroll raster work). Theme containers that clip overflow are widened so the halo isn't cut off. Dark-mode post tags raised from 4.24:1 to 6.8:1, dark-mode previous/next post links from 4.24:1 to 7+:1, and code-comment colour from 2.9:1 to 5+:1. The posts page and archive entries are transparent with a 1px outline, so their text keeps the halo. | `assets/css/extended/site.css` |
+| 2.3.1 Three Flashes | Each shard's total rotation (spin plus its ease back to rest) is capped at one turn per second, and the cursor tilt at 1.4 rad/s. Counting the whole shape's own turn as well, a shard swaps its rainbow face for the complementary one at most ~2.6 times a second, under the limit of 3, at any slider setting and however fast someone clicks or moves the pointer. | `bg-scene.js` (`MAX_SPIN`) |
+| 1.4.3 Contrast | Shards passing behind text never reduce its contrast. Short text (header, home intro, titles, footer) gets a halo in the page's own background colour; long-form text (every block of a post body, including footnotes and shortcode output) sits on blocks of the page colour instead, which costs nothing to paint (a halo on every glyph of a long post measured ~20x the scroll raster work). The clamped home title's clip box is widened so the halo isn't cut off. Dark-mode post tags raised from 4.24:1 to 6.8:1, dark-mode previous/next post links from 4.24:1 to 7+:1, and code-comment colour from 2.9:1 to 5+:1. Entry cards (home, posts, tags, archive) and the previous/next post links are filled with the page colour too, with a 1px outline, so shards pass behind them. | `assets/css/extended/site.css` |
 | 2.4.1 Bypass Blocks | "Skip to content" link, first in the tab order; moves focus into `<main>`. | `layouts/baseof.html` |
 | 2.4.4 / 4.1.2 | Social icon links named "GitHub (opens in new tab)", "RSS feed (opens in new tab)". | `layouts/_partials/social_icons.html` |
-| 2.4.7 / 2.4.11 / 2.5.8 | 44×44 px controls with a 3 px focus ring; `scroll-padding-bottom: 120px` keeps keyboard focus clear of the fixed buttons, including PaperMod's go-to-top button. | `site.css` |
+| 2.4.7 / 2.4.11 / 2.5.8 | 44×44 px controls with a 3 px focus ring; `scroll-padding-bottom` (120px at the default font size, growing with it) keeps keyboard focus clear of the fixed buttons (including PaperMod's go-to-top button), and up to 900px wide space is reserved below the footer so its links and the list pagination never sit under them. | `site.css` |
 | Forced colours | In Windows High Contrast the decorative scene is removed. | `site.css` |
 
 `layouts/baseof.html` and `layouts/_partials/social_icons.html` override PaperMod's files;

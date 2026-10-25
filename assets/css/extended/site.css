@@ -11,7 +11,13 @@
    The WebGL scene can put a shard of any colour behind any text, so text gets a solid
    "halo" in the page's own background colour. On the plain page it is invisible; over a
    shard it keeps every glyph edged in the colour its contrast was designed against.
-   (WCAG's Understanding 1.4.3 counts a halo like this as the text's background.) */
+   (WCAG's Understanding 1.4.3 counts a halo like this as the text's background.)
+   Hard offsets fill a 4px disc around each glyph, plus stacked identical blurs that make the
+   outer edge opaque (the duplicates are deliberate). 4px rather than 3px: with the shape centred
+   behind the home intro, a 3px halo left shard pixels touching the anti-aliased corners of small
+   text (7 of 200 measured text runs on the home page; 0 with 4px). Post text, entry cards and
+   the previous/next links don't use the halo at all: they sit on the page colour instead (see
+   below and part 4), which keeps the paint cost low. */
 :root {
     --halo: var(--theme);
 }
@@ -27,14 +33,22 @@
 
 body {
     text-shadow:
+        -4px -1px 0 var(--halo),
+        -4px 0px 0 var(--halo),
+        -4px 1px 0 var(--halo),
+        -3px -2px 0 var(--halo),
         -3px -1px 0 var(--halo),
         -3px 0px 0 var(--halo),
         -3px 1px 0 var(--halo),
+        -3px 2px 0 var(--halo),
+        -2px -3px 0 var(--halo),
         -2px -2px 0 var(--halo),
         -2px -1px 0 var(--halo),
         -2px 0px 0 var(--halo),
         -2px 1px 0 var(--halo),
         -2px 2px 0 var(--halo),
+        -2px 3px 0 var(--halo),
+        -1px -4px 0 var(--halo),
         -1px -3px 0 var(--halo),
         -1px -2px 0 var(--halo),
         -1px -1px 0 var(--halo),
@@ -42,12 +56,16 @@ body {
         -1px 1px 0 var(--halo),
         -1px 2px 0 var(--halo),
         -1px 3px 0 var(--halo),
+        -1px 4px 0 var(--halo),
+        0px -4px 0 var(--halo),
         0px -3px 0 var(--halo),
         0px -2px 0 var(--halo),
         0px -1px 0 var(--halo),
         0px 1px 0 var(--halo),
         0px 2px 0 var(--halo),
         0px 3px 0 var(--halo),
+        0px 4px 0 var(--halo),
+        1px -4px 0 var(--halo),
         1px -3px 0 var(--halo),
         1px -2px 0 var(--halo),
         1px -1px 0 var(--halo),
@@ -55,14 +73,22 @@ body {
         1px 1px 0 var(--halo),
         1px 2px 0 var(--halo),
         1px 3px 0 var(--halo),
+        1px 4px 0 var(--halo),
+        2px -3px 0 var(--halo),
         2px -2px 0 var(--halo),
         2px -1px 0 var(--halo),
         2px 0px 0 var(--halo),
         2px 1px 0 var(--halo),
         2px 2px 0 var(--halo),
+        2px 3px 0 var(--halo),
+        3px -2px 0 var(--halo),
         3px -1px 0 var(--halo),
         3px 0px 0 var(--halo),
         3px 1px 0 var(--halo),
+        3px 2px 0 var(--halo),
+        4px -1px 0 var(--halo),
+        4px 0px 0 var(--halo),
+        4px 1px 0 var(--halo),
         0 0 4px var(--halo),
         0 0 4px var(--halo),
         0 0 6px var(--halo);
@@ -77,18 +103,26 @@ body {
     margin-inline: -5px;
 }
 
-.first-entry .entry-header,
 .home-info .entry-content {
     padding: 5px;
     margin: -5px;
 }
 
+/* The title is clamped to 3 lines. 3px below it is the most that shows no slice of a 4th line
+   (its glyphs start ~3.3px below the clamp edge) and, with the line's own space under the
+   descenders, still leaves room for the 4px halo. */
+.first-entry .entry-header {
+    padding: 5px 5px 3px;
+    margin: -5px -5px -3px;
+}
+
 /* Long-form text gets an opaque block in the page colour instead of a halo. Painting a halo
    around every glyph of a long post measured ~24x the raster work while scrolling; a
    background costs nothing and guarantees contrast. Shards pass behind these blocks (and show
-   in the gaps between them). Code blocks, rules and images keep their own look. Entry cards and
-   the previous/next links are the exception: they are transparent (part 4) and keep the halo. */
-.post-content > :is(p, h1, h2, h3, h4, h5, h6, ul, ol, dl, blockquote, table, details, figure) {
+   in the gaps between them). That covers every block in a post body, including footnotes and
+   shortcode output; code blocks and rules keep their own look. Entry cards and the
+   previous/next links are filled the same way (part 4). */
+.post-content > :not(pre, .highlight, hr) {
     background: var(--halo);
 }
 
@@ -148,9 +182,29 @@ input, textarea, select, button, .scene-controls, .skip-link, mark, ::selection 
 
 /* 2.4.11 Focus Not Obscured: when keyboard focus scrolls the page, keep the focused element
    clear of the fixed controls (bottom-left, up to 60px) and PaperMod's go-to-top button
-   (bottom-right, 64-104px up: bottom 4rem + height 2.5rem). */
+   (bottom-right, 64-104px up at the default font size: bottom 4rem + height 2.5rem, so it grows
+   with the reader's font size). */
 html {
-    scroll-padding-bottom: 120px;
+    scroll-padding-bottom: 120px; /* engines without max() */
+    scroll-padding-bottom: max(76px, calc(6.5rem + 16px));
+}
+
+/* 2.4.11 at the very end of the page, where scroll-padding can't help: on narrow screens (and at
+   200% zoom) the footer would sit under the fixed controls and the go-to-top button, so reserve
+   room below it (112px at the default font size), up to PaperMod's 900px breakpoint for the
+   go-to-top button. The class is set by bg-scene.js once the controls are shown. The room stays in
+   forced colours, where the go-to-top button still shows; print drops it (end of file). */
+@media (max-width: 900px) {
+    .has-scene-controls body {
+        padding-bottom: 112px; /* engines without max() */
+        padding-bottom: max(68px, calc(6.5rem + 8px));
+    }
+
+    /* PaperMod lifts the go-to-top button another 5rem on list pages at these widths, above the
+       scroll padding and over the footer; the room above keeps it clear at its usual height. */
+    .has-scene-controls .list .top-link {
+        transform: none;
+    }
 }
 
 /* Anchored headings land clear of the sticky header. */
@@ -344,13 +398,13 @@ html {
 }
 
 /* Entry cards on the home page, posts page, tag pages and archive, and the previous/next links:
-   transparent, with the card grey (#2e2e33 in dark mode) kept as a 1px outline. The animated
-   background can show through, so their text keeps the halo from part 1 (inherited from body)
-   instead of relying on an opaque fill. */
+   filled with the page colour, with the card grey (#2e2e33 in dark mode) kept as a 1px outline.
+   Shards pass behind them, so their text needs no halo: painting the halo on every card measured
+   ~20x the scroll raster work of a long archive (~257 ms vs ~12 ms for 106 posts). */
 :is(.post-entry, .archive-entry, .paginav) {
-    background: transparent;
+    background: var(--halo);
     border: 1px solid var(--entry-line);
-    text-shadow: inherit;
+    text-shadow: none;
 }
 
 :is(.post-entry, .archive-entry) {
@@ -469,6 +523,10 @@ html {
 
     #bg-scene, .scene-controls, .skip-link, body::before {
         display: none !important;
+    }
+
+    .has-scene-controls body {
+        padding-bottom: 0;
     }
 
     :is(.post-entry, .archive-entry) {
