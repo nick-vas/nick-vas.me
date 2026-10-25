@@ -149,7 +149,9 @@ same opacity on every page, and carries over as you move between pages.
   `wallStiffness`).
 - The gear button opens sliders for the main effect settings (shatter speed, regather time,
   hover tilt and follow speed, size, opacity, brightness, colours, ...). They apply live, are
-  remembered in `localStorage`, and have a reset button. The list is `FX` in
+  remembered, and have a reset button. They're stored with the pause choice and the scene's
+  clock as one `localStorage` record (`bg-scene-state`), written whole on every change, so every
+  open tab picks up the same state in one step. The list is `FX` in
   `assets/js/bg-scene/fx-panel.js`; defaults are in `assets/js/bg-scene/config.js`.
 - The code is split into modules under `assets/js/bg-scene/`: `config` (settings),
   `shards` (the shapes and their cutting), `storage` (everything remembered between

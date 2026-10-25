@@ -23,12 +23,12 @@ import {
   WebGLRenderer,
 } from './vendor/three.module.js';
 import { HEMI_BASE, SUN_BASE, createConfig } from './bg-scene/config.js';
-import { initFxPanel, restoreFx } from './bg-scene/fx-panel.js';
+import { changedFx, initFxPanel, restoreFx } from './bg-scene/fx-panel.js';
 import { clamp, lerp, mulberry32, smoothstep } from './bg-scene/math.js';
 import { SHAPE_COUNT, makeShape } from './bg-scene/shards.js';
 import {
-  clearSnapshot, firstSceneOfVisit, fromBase64, isSharedKey, loadMotionPref, loadShape, loadTime,
-  saveMotionPref, saveShape, saveTime, storageAvailable, storeSnapshot, takeSnapshot, toBase64,
+  clearSnapshot, firstSceneOfVisit, fromBase64, isStateKey, loadShape, loadState, saveShape,
+  saveState, storageAvailable, storeSnapshot, takeSnapshot, toBase64,
 } from './bg-scene/storage.js';
 
 const canvas = document.getElementById('bg-scene');
@@ -37,13 +37,18 @@ if (canvas) init(canvas);
 function init(canvas) {
   const CFG = createConfig();
   const FX_DEFAULTS = { ...CFG };
-  restoreFx(CFG);
+  // Wall-clock time keeps the hover motion in phase across page loads.
+  const clock = () => Date.now() / 1000;
+  // The pause choice, the scene's clock and the sliders, shared by every page and tab.
+  const stored = loadState(clock());
+  restoreFx(CFG, stored.fx);
 
   // The animation plays by default, even when the OS asks for reduced motion (a deliberate
   // choice for this site). WCAG 2.2.2 (Pause, Stop, Hide) is met by the pause button in
   // scene_controls.html; the choice is remembered across pages. Only the dev-only test panel's
   // sim-rm class starts it paused with no saved choice.
-  let paused = loadMotionPref() ?? document.documentElement.classList.contains('sim-rm');
+  let pauseChoice = stored.paused; // null until the reader presses Pause
+  let paused = pauseChoice ?? document.documentElement.classList.contains('sim-rm');
   // Windows High Contrast / forced colours: site.css hides the scene, so nothing should run.
   const forcedColors = window.matchMedia('(forced-colors: active)');
 
@@ -368,25 +373,20 @@ function init(canvas) {
     positionAttr.needsUpdate = true;
   }
 
-  // Wall-clock time keeps the hover motion in phase across page loads.
-  const clock = () => Date.now() / 1000;
   // Time spent paused is subtracted, so resuming continues smoothly instead of jumping, and
-  // while paused the scene's time stands still at the moment of pausing. Kept in localStorage
-  // next to the pause choice, so every page and tab shows the same pose, paused or not. The
-  // stored values are plain seconds (a pause can last days); the scene's time wraps every ~28 h.
-  // lastIdle/lastDrift: the speeds idleShift/hueShift currently fit; applyFx re-phases them when
-  // the sliders differ.
-  let timeOffset, pausedAt, idleShift, hueShift, lastIdle, lastDrift;
-  function adoptClock(time) {
-    ({ offset: timeOffset, pausedAt, idleShift, hueShift } = time);
-    [lastIdle, lastDrift] = time.speeds || [CFG.idle, CFG.hueDrift]; // unstamped: assume the sliders
-  }
-  adoptClock(loadTime(clock()));
-  const saveClock = () => saveTime({ offset: timeOffset, pausedAt, idleShift, hueShift, speeds: [lastIdle, lastDrift] });
+  // while paused the scene's time stands still at the moment of pausing. Shared with the pause
+  // choice, so every page and tab shows the same pose, paused or not. The stored values are
+  // plain seconds (a pause can last days); the scene's time wraps every ~28 h.
+  let { offset: timeOffset, pausedAt, idleShift, hueShift } = stored;
+  // The speeds idleShift/hueShift fit; a slider move re-phases them (see onFxChange).
+  let lastIdle = CFG.idle;
+  let lastDrift = CFG.hueDrift;
   const animTime = () => ((paused && pausedAt ? pausedAt : clock()) - timeOffset) % 100000;
-  // The time the stored clock stands at (a stored pause moment counts even before this page applies
-  // it); speed changes are re-phased at this time, so every tab arrives at the same shifts.
-  const clockTime = () => ((pausedAt || clock()) - timeOffset) % 100000;
+  // Only a page that changes something saves (pausing, resuming, a slider); pages that pick up
+  // another tab's change never write it back, so tabs can't rewrite each other's state.
+  const saveShared = () => saveState({
+    paused: pauseChoice, offset: timeOffset, pausedAt, idleShift, hueShift, fx: changedFx(CFG, FX_DEFAULTS),
+  });
 
   function place(t, dt) {
     // The shape leans gently toward the pointer. It never lights up or swells on hover.
@@ -449,41 +449,43 @@ function init(canvas) {
     if (!e.persisted) return;
     // Other pages may have paused/resumed the animation, moved the time offset, changed the
     // sliders or advanced the shape while this one sat in the cache; pick all of that up.
-    loadShared();
-    const nextPaused = loadMotionPref() ?? paused;
+    adoptShared();
+    const nextPaused = pauseChoice ?? paused;
     // A paused page shows the current shape whole; a playing one resumes a carried-over shatter.
     if (nextPaused || !restoreSnapshot()) {
       const current = loadShape(SHAPE_COUNT);
       if (!whole || current !== to) resetToWhole(current);
     }
     if (nextPaused) clearSnapshot();
-    setPaused(nextPaused, false); // draws the still frame once if paused, else resumes the loop
+    setPaused(nextPaused); // draws the still frame once if paused, else resumes the loop
   });
 
-  // The clock and the sliders, as the last page or tab to change them left them. The clock's
-  // phase shifts fit the slider speeds stored with them; if the sliders have moved on since
-  // (another tab is between its two writes of a slider move), applyFx re-phases them here in
-  // memory only. A re-phase is saved only by the tab that moved the slider, so a sync never
-  // triggers a write; this tab saves the clock again only when it pauses or resumes itself.
-  function loadShared() {
-    if (!storageAvailable()) return; // blocked storage: keep what this page has in memory
+  // The shared state as the last page or tab to change it left it: the clock, the sliders and the
+  // pause choice, all from one record, so the phase shifts always fit the sliders they came with.
+  // The caller applies the pause choice. Returns false (keeping what this page has in memory)
+  // when storage is blocked.
+  function adoptShared() {
+    if (!storageAvailable()) return false;
+    const s = loadState(clock());
+    ({ offset: timeOffset, pausedAt, idleShift, hueShift } = s);
+    pauseChoice = s.paused;
     Object.assign(CFG, FX_DEFAULTS);
-    restoreFx(CFG);
-    adoptClock(loadTime(clock()));
+    restoreFx(CFG, s.fx);
+    lastIdle = CFG.idle; // the stored shifts fit the stored sliders
+    lastDrift = CFG.hueDrift;
     refreshFxPanel();
-    applyFx(false);
+    applyLook();
+    return true;
   }
 
   // Pausing, resuming or moving a slider in another tab applies here too (storage events fire in
   // the other tabs; several in a row are taken once, on the next frame).
   let syncFrame = 0;
   window.addEventListener('storage', (e) => {
-    if (!isSharedKey(e.key) || syncFrame) return;
+    if (!isStateKey(e.key) || syncFrame) return;
     syncFrame = requestAnimationFrame(() => {
       syncFrame = 0;
-      loadShared(); // redraws the still frame if paused
-      const pref = loadMotionPref();
-      if (pref !== null && pref !== paused) setPaused(pref, false);
+      if (adoptShared() && pauseChoice !== null && pauseChoice !== paused) setPaused(pauseChoice);
     });
   });
 
@@ -544,58 +546,63 @@ function init(canvas) {
   const pauseBtn = document.getElementById('scene-pause');
   const shatterBtn = document.getElementById('scene-shatter');
 
-  function setPaused(p, save = true) {
+  // Saves when asked (the reader pressed Pause here) or when the clock moves here, not when this
+  // page takes on a pause or resume another tab already saved.
+  function setPaused(p, save = false) {
     paused = p;
+    let moved = false;
     if (p) {
       stop();
-      if (!pausedAt) pausedAt = clock(); // keep an earlier page's pause moment, so the pose matches
+      if (!pausedAt) { pausedAt = clock(); moved = true; } // keep an earlier page's pause moment
       // Drop the cursor lean too, so the paused pose depends only on time and is the
       // same on every page (otherwise it would jump on the next page load).
       hovering = false;
       tilt.set(0, 0);
       showStill();
     } else {
-      if (pausedAt) timeOffset += clock() - pausedAt;
-      pausedAt = 0;
+      if (pausedAt) { timeOffset += clock() - pausedAt; pausedAt = 0; moved = true; }
       start();
     }
-    saveClock();
+    if (save || moved) saveShared();
     // A toggle button keeps one name (and tooltip); aria-pressed carries the state (WAI-ARIA APG).
     if (pauseBtn) pauseBtn.setAttribute('aria-pressed', String(p));
     // A pause from another tab can disable the button under keyboard focus; hand focus to Pause.
     if (p && shatterBtn && pauseBtn && document.activeElement === shatterBtn) pauseBtn.focus();
     if (shatterBtn) shatterBtn.disabled = p;
-    if (save) saveMotionPref(p);
   }
 
-  if (pauseBtn) pauseBtn.addEventListener('click', () => setPaused(!paused));
+  if (pauseBtn) pauseBtn.addEventListener('click', () => {
+    pauseChoice = !paused;
+    setPaused(pauseChoice, true);
+  });
   // WCAG 2.1.1 (Keyboard): the shatter isn't mouse-only; this button bursts the shape from its centre.
   if (shatterBtn) shatterBtn.addEventListener('click', () => { if (!paused) shatterFrom(0, 0, 0); });
 
   // Effect sliders (fx-panel.js). Changes apply live, and redraw the still frame when paused.
-  function applyFx(persist = true) {
-    // Rotation and colour are speed x absolute time, so changing a speed would make them jump
-    // by (time x change). Shift their phase by the opposite amount to keep them where they are.
-    const t = clockTime();
-    if (CFG.idle !== lastIdle || CFG.hueDrift !== lastDrift) {
-      idleShift += t * 0.22 * (lastIdle - CFG.idle);
-      hueShift = (hueShift + t * (lastDrift - CFG.hueDrift)) % 1;
-      lastIdle = CFG.idle;
-      lastDrift = CFG.hueDrift;
-      if (persist) saveClock();
-    }
+  function applyLook() {
     frontMaterial.opacity = backMaterial.opacity = CFG.opacity;
     hemi.intensity = HEMI_BASE * CFG.light;
     sun.intensity = SUN_BASE * CFG.light;
     if (paused) showStill();
   }
-  const refreshFxPanel = initFxPanel(CFG, FX_DEFAULTS, () => applyFx());
-  applyFx(false);
+  function onFxChange() {
+    // Rotation and colour are speed x absolute time, so changing a speed would make them jump
+    // by (time x change). Shift their phase by the opposite amount to keep them where they are.
+    const t = animTime();
+    idleShift += t * 0.22 * (lastIdle - CFG.idle);
+    hueShift = (hueShift + t * (lastDrift - CFG.hueDrift)) % 1;
+    lastIdle = CFG.idle;
+    lastDrift = CFG.hueDrift;
+    saveShared();
+    applyLook();
+  }
+  const refreshFxPanel = initFxPanel(CFG, FX_DEFAULTS, onFxChange);
+  applyLook();
 
   // The wall test in step() needs the shape's real position and scale, so place it first.
   place(animTime(), 0);
   if (paused) clearSnapshot(); else restoreSnapshot();
-  setPaused(paused, false); // draws the still frame when paused, starts the loop when playing
+  setPaused(paused); // draws the still frame when paused, starts the loop when playing
   if (!paused) showStill(); // first frame now, not on the next animation frame
   // Fade in on the first page of a visit only; later pages show it at full opacity at once,
   // so moving between pages never dips the shape's opacity.
